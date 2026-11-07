@@ -43,6 +43,7 @@ shutdown, and recommends the cheapest response. Solo project, deadline Sun Nov 8
   - `forecast.py` hours_to_limit for ongoing pump failures (p10/p50/p90)
   - `optimize.py` cheapest plan per system: trucks (shared fleet), shut-ins (may start late),
                   or accept trip; plan all ongoing failures in a system jointly
+  - `alerts.py`   alerts view ordering + events.json export (SPEC shape, plus plan details)
   - `api.py`      endpoints: /datasets, /network, /events, /alerts, /series, /plan, /whatif
 - `frontend/` React + Vite + TypeScript, Recharts for trends, Leaflet for the map.
   Mobile-friendly layout. Alerts view order per SPEC: pump failures by smallest
@@ -66,3 +67,4 @@ shutdown, and recommends the cheapest response. Solo project, deadline Sun Nov 8
 - `python scripts/score.py ./HackUTD-ZeroDay/history` run accuracy report on all practice folders
 - `uvicorn backend.api:app --reload` backend
 - `cd frontend && npm run dev` frontend
+- `python -m backend.alerts <dataset folder> -o events.json --alerts` export events.json and print the alerts view
