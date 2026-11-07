@@ -1,0 +1,4 @@
+HackUTD-ZeroDay/
+__pycache__/
+*.pyc
+.venv/
