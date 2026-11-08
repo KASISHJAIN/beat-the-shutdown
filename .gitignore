@@ -7,3 +7,5 @@ frontend/dist/
 *.tsbuildinfo
 events.json
 firmware/**/secrets.h
+.env
+handoffs/

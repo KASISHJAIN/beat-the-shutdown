@@ -6,6 +6,7 @@ import { Header } from "./components/Header";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { MapView } from "./components/MapView";
 import { FacilityDetail } from "./components/FacilityDetail";
+import { HandoffPanel } from "./components/HandoffPanel";
 
 type Tab = "alerts" | "map" | "detail";
 const PLAY_STEP_S = 15 * 60;   // replay speed: 15 data-minutes per tick
@@ -74,6 +75,7 @@ export default function App() {
   const [twin, setTwin] = useState<TwinStatus | null>(null);
   const [twinLoadedAt, setTwinLoadedAt] = useState(Date.now());
   const [twinEnabled, setTwinEnabled] = useState(false);
+  const [handoffOpen, setHandoffOpen] = useState(false);
   const req = useRef(0);
 
   useEffect(() => {
@@ -178,7 +180,11 @@ export default function App() {
     <div className="app">
       <Header datasets={datasets} dataset={dataset} onDataset={chooseDataset} time={network}
         pending={pending} onScrub={setPending} onCommit={commit} playing={playing}
-        onTogglePlay={() => setPlaying((x) => !x)} loading={loading} theme={theme} onToggleTheme={toggleTheme} />
+        onTogglePlay={() => setPlaying((x) => !x)} loading={loading} theme={theme} onToggleTheme={toggleTheme}
+        onHandoff={() => { setPlaying(false); setHandoffOpen(true); }} />
+      {handoffOpen && dataset && (
+        <HandoffPanel dataset={dataset} now={network?.now_unix ?? now} onClose={() => setHandoffOpen(false)} />
+      )}
       <main className={`layout ${facility ? "with-detail" : ""}`} data-tab={tab}>
         <div className="col col-alerts">
           <AlertsPanel alerts={allAlerts} network={network} nowUnix={dataNow} twin={twin}

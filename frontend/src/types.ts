@@ -187,3 +187,14 @@ export interface ClockedAlert extends EventRecord {
   clockNow: number;
   clockLoadedAt: number;
 }
+
+export interface HandoffResponse {
+  dataset: string;
+  source: "nemotron" | "template";
+  model: string | null;
+  reason?: string;
+  markdown: string;
+  steps: { tool: string; args: Record<string, unknown>; ms: number; ok: boolean }[];
+  now_unix: number;
+  seconds: number;
+}

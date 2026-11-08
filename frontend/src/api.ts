@@ -4,18 +4,20 @@ import type {
   EventsResponse,
   Network,
   PlanResponse,
+  HandoffResponse,
   SeriesResponse,
   TwinStatus,
 } from "./types";
 
 const BASE = (import.meta as { env?: Record<string, string> }).env?.VITE_API_BASE ?? "";
 
-async function get<T>(path: string, params: Record<string, string | number | undefined | null>): Promise<T> {
+async function get<T>(path: string, params: Record<string, string | number | undefined | null>,
+  method: "GET" | "POST" = "GET"): Promise<T> {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
   }
-  const res = await fetch(`${BASE}${path}?${q.toString()}`);
+  const res = await fetch(`${BASE}${path}?${q.toString()}`, { method });
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -39,4 +41,5 @@ export const api = {
   plan: (dataset: string, event_id: string, now?: number | null) =>
     get<PlanResponse>("/api/plan", { dataset, event_id, now }),
   twin: () => get<TwinStatus>("/api/twin", {}),
+  handoff: (dataset: string, now?: number | null) => get<HandoffResponse>("/api/handoff", { dataset, now }, "POST"),
 };

@@ -98,6 +98,26 @@ python scripts/fake_twin.py --url http://<laptop-ip>:8000/twin/ingest
 Run uvicorn with `--host 0.0.0.0` so the ESP32 can reach the laptop. Use `POST /twin/reset` to
 clear the twin's history and `GET /api/twin` to see its status.
 
+## Shift handoff agent (NVIDIA Nemotron)
+
+The **Shift handoff** button in the header writes a handoff for the moment on screen.
+`backend/agent.py` is a multi-step, tool-using agent. Each tool calls the existing modules:
+
+| Tool | What it returns |
+|---|---|
+| `get_alerts` | Every problem in progress in SPEC order with countdown, plan, costs and evidence; plus events resolved in the last 12 h |
+| `get_series` | Summary and ~24 points of one telemetry series |
+| `optimize_plan` | The cheapest plan from now for a pump failure, with its reasoning |
+| `what_if` | Any custom truck or shut-in plan scored against doing nothing |
+| `write_handoff` | Saves the final Markdown (also to `handoffs/`, gitignored) |
+
+To turn it on, copy `.env.example` to `.env` and set `NVIDIA_API_KEY` (from build.nvidia.com).
+The model defaults to `nvidia/llama-3.3-nemotron-super-49b-v1` and can be changed with
+`NVIDIA_MODEL`. The only LLM call is `llm_chat()`. Without a key, or if the call fails for any
+reason, the same tools fill a fixed template, so the button always works. The panel shows which
+mode was used and the tool calls made. From the command line:
+`python -m backend.agent HackUTD-ZeroDay/history/snapshot_2026-10-10T0900`.
+
 ## Check accuracy
 
 ```bash

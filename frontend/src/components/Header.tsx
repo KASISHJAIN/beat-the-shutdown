@@ -17,6 +17,7 @@ interface Props {
   loading: boolean;
   theme: ThemeName;
   onToggleTheme: () => void;
+  onHandoff: () => void;
 }
 
 export function Header(p: Props) {
@@ -90,6 +91,8 @@ export function Header(p: Props) {
         </div>
       </div>
 
+      <button className="btn btn-primary handoff-btn" onClick={p.onHandoff} disabled={!t}
+        title="Write the shift handoff for this moment">Shift handoff</button>
       <button className="btn theme-toggle" onClick={p.onToggleTheme} aria-label="Toggle dark theme"
         title={p.theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}>
         {p.theme === "dark" ? "Light" : "Dark"}

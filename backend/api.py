@@ -311,6 +311,28 @@ def twin_status():
                    "shutdown_pct": net["shutdown_pct"], "alerts": al["alerts"]})
 
 
+# --- shift handoff (Nemotron agent, template fallback) -------------------------------
+@app.get("/api/agent")
+def agent_info():
+    from . import agent
+    env = agent._env()
+    return {"llm": agent.llm_available(), "model": env["NVIDIA_MODEL"] if agent.llm_available() else None}
+
+
+@app.post("/api/handoff")
+def handoff(dataset: str, now: int | None = None, include_twin: bool = True, use_llm: bool = True):
+    """Write the shift handoff for this dataset at `now` (plus the live twin when streaming).
+    Never fails because of the LLM: without a key or on any LLM error it uses the template."""
+    from . import agent
+    dataset, now = _ctx(dataset, now)
+    ds, evs = _cut(dataset, now)
+    extra = []
+    st = twin_mod.store()
+    if include_twin and dataset != twin_mod.DATASET_ID and st is not None and st.online() and st.dataset():
+        extra = [dict(a, live=True) for a in alerts(twin_mod.DATASET_ID)["alerts"]]
+    return _clean({"dataset": dataset, **agent.generate_handoff(ds, evs, extra, use_llm=use_llm)})
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "data_root": str(DATA_ROOT), "datasets": len(_discover())}
