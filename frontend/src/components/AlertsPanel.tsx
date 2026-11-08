@@ -212,6 +212,13 @@ function InspectionCard({ a, nowUnix, selected, onSelect }: {
           </div>
           <h3>{a.asset_id}</h3>
           <div className="card-sub">{a.facility_id} · since {dayTime(a.onset_unix)} UTC ({hoursText(age)})</div>
+          {a.detected_unix != null && (
+            <div className="card-sub detect-lag"
+              title="Time from the estimated onset to the first reading that tripped the detector">
+              Detected {hoursText(Math.max(0, a.detected_unix - a.onset_unix) / 3600)} after onset
+              {" "}(flagged {hhmm(a.detected_unix)} UTC)
+            </div>
+          )}
         </div>
         <button className="btn btn-small" onClick={() => onSelect(a.facility_id, a.event_id)}>Details</button>
       </header>

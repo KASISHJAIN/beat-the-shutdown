@@ -218,6 +218,38 @@ def score_folder(folder: Path, tol_s: float, verbose: bool) -> dict:
                 mean_onset_min=mean_on, max_onset_min=max_on, **pl, **fo)
 
 
+def detection_lag_report(first_seen: dict, first_cut: int) -> dict:
+    """How long after the TRUE onset each fault type is first flagged.
+
+    flagged  = the sample at which the detector's flag first tripped, in the earliest sweep cut
+               that contains the event (computed only from data up to that cut, so causal)
+    on screen = that earliest cut's time (an upper bound at the sweep's resolution)
+    Events that started before the first cut are left out of "on screen".
+    """
+    import statistics
+    out = {}
+    print("  detection lag after true onset (minutes):")
+    print(f"    {'category':17} {'n':>2}  {'flagged median':>14} {'flagged worst':>13}  {'on screen median':>16} {'worst':>6}")
+    for cat in ("pump_failure", "pipeline_leak", "pump_degradation"):
+        rows = [(t, d, c) for t, d, c in first_seen.values() if t["category"] == cat]
+        if not rows:
+            continue
+        flag = [(d - t["onset_unix"]) / 60 for t, d, _ in rows]
+        seen = [(c - t["onset_unix"]) / 60 for t, _, c in rows if t["onset_unix"] >= first_cut]
+        out[cat] = {"n": len(rows), "flag_median": statistics.median(flag), "flag_worst": max(flag),
+                    "seen_median": statistics.median(seen) if seen else None,
+                    "seen_worst": max(seen) if seen else None,
+                    "per_event": {t["id"]: round((d - t["onset_unix"]) / 60) for t, d, _ in rows}}
+        r = out[cat]
+
+        def fmt(x):
+            return "" if x is None else f"{x:.0f}"
+        print(f"    {cat:17} {r['n']:>2}  {fmt(r['flag_median']):>14} {fmt(r['flag_worst']):>13}  "
+              f"{fmt(r['seen_median']):>16} {fmt(r['seen_worst']):>6}")
+        print(f"      per event: {r['per_event']}")
+    return out
+
+
 def sweep(folder: Path, step_h: float, tol_s: float, grace_h: float) -> bool:
     """Cut the full dataset at every step_h hours and grade each cut against the full key.
 
@@ -229,6 +261,7 @@ def sweep(folder: Path, step_h: float, tol_s: float, grace_h: float) -> bool:
     step = int(step_h * 3600)
     cuts = range(full.start_unix + 12 * 3600, full.now_unix + 1, step)
     tot = dict(cuts=0, missed=0, false=0, status=0, unobs=0, onset=[])
+    first_seen: dict[str, tuple[dict, int, int]] = {}  # event id -> (truth, detected_unix, cut)
     print(f"\n=== sweep {folder.name}: {len(cuts)} cuts every {step_h} h, grace {grace_h} h")
     for now in cuts:
         ds = truncate(full, now)
@@ -242,6 +275,9 @@ def sweep(folder: Path, step_h: float, tol_s: float, grace_h: float) -> bool:
                 e["status"], e["end_unix"] = "ongoing", None
             truth.append(e)
         matched, missed, false = match(truth, events, tol_s)
+        for t, f in matched:  # earliest cut that sees each event: a causal "first flagged" time
+            if t["id"] not in first_seen and f.detected_unix is not None:
+                first_seen[t["id"]] = (t, f.detected_unix, ds.now_unix)
         missed = [m for m in missed if ds.now_unix - m["onset_unix"] > grace_h * 3600]
         bad_st = sum(1 for t, f in matched if t["status"] != f.status
                      and not (f.unverified and t["status"] == "resolved"))
@@ -260,6 +296,7 @@ def sweep(folder: Path, step_h: float, tol_s: float, grace_h: float) -> bool:
                             for t, f in matched if t["status"] != f.status and not f.unverified)
                   + "".join(f"\n    ONSET {t['id']} {t['asset']} err {(f.onset_unix - t['onset_unix']) / 60:+.0f} min"
                             for t, f in big))
+    detection_lag_report(first_seen, cuts[0])
     on = tot["onset"]
     print(f"  -> {tot['cuts']} cuts: missed {tot['missed']}, false {tot['false']}, status mismatches "
           f"{tot['status']} (+{tot['unobs']} unobservable), onset |err| mean "

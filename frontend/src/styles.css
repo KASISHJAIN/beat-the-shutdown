@@ -332,3 +332,4 @@ code { font-size: 12px; background: var(--surface-2); padding: 0 4px; border-rad
 }
 
 .md-more { margin-top: 2px; }
+.detect-lag { color: var(--text); font-weight: 500; }

@@ -25,6 +25,7 @@ def _event_record(ds: Dataset, e: Event, plan: Plan | None, ongoing_failure: boo
         "onset_ts": e.onset_ts, "onset_unix": e.onset_unix,
         "end_ts": e.end_ts, "end_unix": e.end_unix,
         "confidence": e.confidence, "evidence": list(e.evidence),
+        "detected_unix": e.detected_unix,  # when the detector's flag first tripped
         "level_pct": None, "hours_to_limit": None, "recommended_actions": [],
     }
     if e.category == "pump_failure":

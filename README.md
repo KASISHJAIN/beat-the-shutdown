@@ -118,6 +118,38 @@ reason, the same tools fill a fixed template, so the button always works. The pa
 mode was used and the tool calls made. From the command line:
 `python -m backend.agent HackUTD-ZeroDay/history/snapshot_2026-10-10T0900`.
 
+## Results
+
+Measured with `scripts/score.py` against the practice answer keys (never read by the app).
+
+| Check | Result |
+|---|---|
+| Detection, `full_week` and all 3 snapshots | 23/23, 13/13, 15/15, 21/21 events; 0 missed, 0 false |
+| Onset error | mean 2.8–5.4 min per folder, worst 25 min |
+| 15-minute sweep of `full_week` (624 cuts, each treated as "now") | 0 missed, 0 false, 0 wrong status; onset error mean 4.6 min, p95 20 min |
+| Plans vs `reference_action` | 13/13 at each onset (`full_week`), 7/7 from "now" (snapshots) |
+| `hours_to_limit` vs reference (snapshots) | within 0.8 min |
+
+### How fast each fault is flagged
+
+From the 15-minute sweep. A fault counts as flagged at the first reading that tripped the
+detector, using only data up to that moment, measured from the answer key's true onset.
+
+| Fault | Events | Flagged after onset: median | Worst | After the pump first runs: median | Worst |
+|---|---|---|---|---|---|
+| Pump failure | 13 | 0 min | 0 min | 0 min | 0 min |
+| Pipeline leak | 5 | 30 min | 90 min | 25 min | 30 min |
+| Worn pump | 5 | 170 min | 225 min | 55 min | 205 min |
+
+Leaks and worn pumps can only be seen while the pump runs (no flow, no signal), so part of each
+lag is time the pump sat idle. EVENT_1's 90 min, for example, is 60 min with the pump off plus
+30 min of detection. A worn pump loses only about 0.4 % of its flow per hour, so it takes a few
+hours of running to stand clear of the noise. Each leak and wear alert in the console shows
+"Detected X after onset". There, onset is the app's own estimate, since the true onset isn't
+known live.
+
+Reproduce with `python scripts/score.py --sweep 0.25`.
+
 ## Check accuracy
 
 ```bash

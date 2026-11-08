@@ -112,6 +112,7 @@ export interface EventRecord {
   end_unix: number | null;
   confidence: number;
   evidence: string[];
+  detected_unix?: number | null; // when the detector first flagged it
   level_pct: number | null;
   hours_to_limit: HoursToLimit | null;
   recommended_actions: Action[];
