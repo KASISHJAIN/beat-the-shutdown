@@ -67,7 +67,19 @@ export function AlertsPanel(p: Props) {
           </li>
         ))}
       </ol>
+      <footer className="credit">Built for the EOG Resources HackUTD challenge</footer>
     </section>
+  );
+}
+
+/** Warning triangle so "critical" never relies on red alone. */
+function WarnIcon() {
+  return (
+    <svg className="sev-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 1.5 15 14.5H1z" fill="currentColor" />
+      <rect x="7.2" y="6" width="1.6" height="4.6" rx="0.8" fill="var(--surface)" />
+      <rect x="7.2" y="11.6" width="1.6" height="1.6" rx="0.8" fill="var(--surface)" />
+    </svg>
   );
 }
 
@@ -89,7 +101,9 @@ function FailureCard({ a, live, warning, shutdown, selected, onSelect }: {
         <span className="order">{a.order}</span>
         <div className="card-title">
           <div className="card-kicker">
-            <span className={`sev-pill sev-${sev}`}>{sev === "critical" ? "Critical" : "High"}</span>
+            <span className={`sev-pill sev-${sev}`}>
+              {sev === "critical" && <WarnIcon />}{sev === "critical" ? "Critical" : "High"}
+            </span>
             {CATEGORY_LABEL[a.category]}
             {a.live && <LiveBadge />}
           </div>
@@ -131,6 +145,8 @@ function FailureCard({ a, live, warning, shutdown, selected, onSelect }: {
           <ul className="actions">
             {tripped ? (
               <li className="action action-none">Nothing to dispatch: trucks or shut-ins can't restart the wells early</li>
+            ) : plan.kind === "accept_trip" ? (
+              <li className="action action-none">Accept the trip: nothing cheaper prevents it</li>
             ) : plan.recommended_actions.map((x, i) => (
               <li key={i} className={`action action-${x.type}`}>{actionText(x, plan.plan_start_unix)}</li>
             ))}

@@ -5,7 +5,7 @@ telemetry, detects **pump failures, pipeline leaks and worn pumps**, counts down
 shutdown limit, and recommends the cheapest response: trucks, well shut-ins, a mix, or accepting
 the trip, with all failures in a system sharing its trucks.
 
-![Alerts view: pump failures in SPEC order with countdowns and plans, the live hardware twin, and the network map](docs/alerts.png)
+![Alerts view: pump failures in SPEC order with countdowns and plans, the live hardware twin, and the network map (EOG-inspired charcoal, white and red palette)](docs/alerts.png)
 
 ## Screenshots
 

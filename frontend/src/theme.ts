@@ -22,24 +22,24 @@ export interface Palette {
   tileAttribution: string;
 }
 
-const SEV_LIGHT = { critical: "#d13438", high: "#e8590c", urgent: "#8e4ec6", warning: "#b88700", ok: "#2b9a66" };
-const SEV_DARK = { critical: "#ff6369", high: "#ff8b3e", urgent: "#bf7af0", warning: "#f5c542", ok: "#3dd68c" };
+const SEV_LIGHT = { critical: "#c4261b", high: "#b54708", urgent: "#6b3fa0", warning: "#8a6100", ok: "#4f6f5f" };
+const SEV_DARK = { critical: "#ff6b5e", high: "#f59e5b", urgent: "#b794f6", warning: "#e8b931", ok: "#8db5a0" };
 // Esri grey canvas basemaps: keyless, low-contrast, so status colours stand out.
 const ESRI = "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors";
 
 export const PALETTES: Record<ThemeName, Palette> = {
   light: {
-    text: "#1c2024", muted: "#60646c", grid: "#e0e1e6", surface: "#ffffff", accent: "#0b68cb",
-    series1: "#0b68cb", series2: "#2b9a66", series3: "#8e4ec6",
-    warning: "#b88700", shutdown: "#d13438", plan: "#0b68cb", nothing: "#d13438", onset: "#e8590c",
+    text: "#1f1d1d", muted: "#615d5d", grid: "#dcdada", surface: "#ffffff", accent: "#2f5d8a",
+    series1: "#2f5d8a", series2: "#4f6f5f", series3: "#6b3fa0",
+    warning: "#8a6100", shutdown: "#c4261b", plan: "#2f5d8a", nothing: "#c4261b", onset: "#b54708",
     sev: SEV_LIGHT,
     tiles: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
     tileAttribution: ESRI,
   },
   dark: {
-    text: "#edeef0", muted: "#9ba1a6", grid: "#2b3138", surface: "#151a20", accent: "#4ca8ff",
-    series1: "#4ca8ff", series2: "#3dd68c", series3: "#bf7af0",
-    warning: "#f5c542", shutdown: "#ff6369", plan: "#4ca8ff", nothing: "#ff6369", onset: "#ff8b3e",
+    text: "#f1f0f0", muted: "#ada8a8", grid: "#383535", surface: "#1c1b1b", accent: "#7fa7d4",
+    series1: "#7fa7d4", series2: "#8db5a0", series3: "#b794f6",
+    warning: "#e8b931", shutdown: "#ff6b5e", plan: "#7fa7d4", nothing: "#ff6b5e", onset: "#f59e5b",
     sev: SEV_DARK,
     tiles: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
     tileAttribution: ESRI,
@@ -62,7 +62,7 @@ export function useTheme(): [ThemeName, () => void] {
   const [theme, setTheme] = useState<ThemeName>(initialTheme);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", PALETTES[theme].surface);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#161515" : "#373535");
     try {
       localStorage.setItem("bts-theme", theme);
     } catch {
