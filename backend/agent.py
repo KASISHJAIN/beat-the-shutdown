@@ -26,16 +26,17 @@ import numpy as np
 from .alerts import build
 from .detect import detect_events
 from .loader import Dataset
-from .optimize import (_context, _do_nothing, _make_plan, plan_ongoing, simulate,
+from .optimize import (_context, _do_nothing, _make_plan, plan_ongoing, simulate, well_revenue_per_hour,
                        facility_revenue_per_hour)
 
 ROOT = Path(__file__).resolve().parent.parent
 HANDOFF_DIR = ROOT / "handoffs"
 MAX_STEPS = 8
+TIME_BUDGET_S = 120  # whole agent run; past this the console gets the template instead
 
 DEFAULTS = {
     "NVIDIA_BASE_URL": "https://integrate.api.nvidia.com/v1",
-    "NVIDIA_MODEL": "nvidia/llama-3.3-nemotron-super-49b-v1",
+    "NVIDIA_MODEL": "nvidia/nemotron-3-ultra-550b-a55b",
 }
 
 
@@ -76,7 +77,14 @@ def llm_chat(messages: list[dict], tools: list[dict] | None = None, timeout: flo
         body["tool_choice"] = "auto"
     r = httpx.post(f"{env['NVIDIA_BASE_URL'].rstrip('/')}/chat/completions", json=body, timeout=timeout,
                    headers={"Authorization": f"Bearer {key}", "Accept": "application/json"})
-    r.raise_for_status()
+    if r.status_code >= 400:
+        # Surface NVIDIA's own one-line explanation (e.g. a retired model), not httpx boilerplate.
+        try:
+            j = r.json()
+            detail = j.get("detail") or (j.get("error") or {}).get("message") or j.get("title") or r.text
+        except ValueError:
+            detail = r.text
+        raise RuntimeError(f"NVIDIA API {r.status_code}: {' '.join(str(detail).split())[:200]}")
     return r.json()["choices"][0]["message"]
 
 
@@ -96,6 +104,7 @@ class Toolbox:
     events: list
     extra: list[dict] = field(default_factory=list)  # e.g. live-twin alerts, already built
     trace: list[dict] = field(default_factory=list)
+    corpus: list[str] = field(default_factory=list)  # every tool output, for the grounding check
     handoff: str | None = None
     _built: dict | None = None
 
@@ -114,11 +123,16 @@ class Toolbox:
         for a in self._alerts_full():
             h = a.get("hours_to_limit") or {}
             p = a.get("plan") or {}
+            start = p.get("plan_start_unix", self.ds.now_unix)
+            # Absolute times are computed here so the model never does clock arithmetic.
+            shutdown_at = _iso(start + h["p50"] * 3600) if h.get("p50") else None
+            repair_due = _iso(start + p["horizon_min"] * 60) if p.get("horizon_min") is not None else None
             out.append({
                 "event_id": a["event_id"], "category": a["category"], "facility_id": a["facility_id"],
                 "asset_id": a["asset_id"], "since": _iso(a["onset_unix"]), "live_twin": a.get("live", False),
                 "confidence": a["confidence"], "unverified": a.get("unverified", False),
                 "level_pct": a.get("level_pct"), "hours_to_limit_p50": _r(h.get("p50"), 3),
+                "shutdown_at": shutdown_at, "repair_due": repair_due,
                 "lost_revenue_per_hour": a.get("lost_revenue_per_hour"),
                 "plan": p.get("summary"), "plan_cost": p.get("est_cost"), "do_nothing_cost": p.get("nothing_cost"),
                 "actions": a.get("recommended_actions"),
@@ -152,9 +166,21 @@ class Toolbox:
         if p is None:
             return {"error": "repair already due; nothing to plan"}
         d = p.to_dict()
+        fac = self.ds.facilities[ev.facility_id]
+        rev = well_revenue_per_hour(self.ds, fac)
+        so = self.ds.ops["systems"][ev.system_id]["facilities"][fac.id]
+        end = p.start_unix + p.horizon_min * 60
+        # Each action spelled out, so the model copies figures instead of deriving them.
+        shutins = [{"well": w, "start_at": _iso(p.start_unix + s * 60), "start_after_min": s,
+                    "lost_per_hour": _r(rev[w]), "hours_shut": _r((p.horizon_min - s) / 60),
+                    "cost": _r(rev[w] * (p.horizon_min - s) / 60)} for w, s in p.shutins]
+        arrivals = [_iso(p.start_unix + (so["response_min"] + i * so["cycle_min"]) * 60)
+                    for i in range(p.trips_per_truck)] if p.trucks else []
         return {k: d[k] for k in ("summary", "kind", "est_cost", "nothing_cost", "truck_cost", "shutin_cost",
                                   "trucks_free", "recommended_actions", "explanation", "alternatives")} | {
-            "peak_pct": d["peak_pct"], "trips_at": _iso(d["trips_at_unix"])}
+            "peak_pct": d["peak_pct"], "trips_at": _iso(d["trips_at_unix"]), "repair_due": _iso(end),
+            "truck_arrivals_at": arrivals, "trucks": p.trucks, "trips_per_truck": p.trips_per_truck,
+            "shutin_details": shutins}
 
     def what_if(self, event_id: str, trucks: int = 0, trips_per_truck: int = 1,
                 shut_in_wells: list[str] | None = None, start_after_min: int = 0) -> dict:
@@ -196,6 +222,8 @@ class Toolbox:
             out = fn(**args) if fn else {"error": f"unknown tool {name}"}
         except TypeError as e:
             out = {"error": f"bad arguments: {e}"}
+        if name != "write_handoff":
+            self.corpus.append(json.dumps(out, default=str))
         self.trace.append({"tool": name, "args": {k: v for k, v in args.items() if k != "markdown"},
                            "ms": int((time.time() - t0) * 1000),
                            "ok": "error" not in out})
@@ -205,7 +233,7 @@ class Toolbox:
 TOOL_SPECS = [
     {"type": "function", "function": {
         "name": "get_alerts",
-        "description": "Every problem in progress at 'now' in SPEC order (pump failures by soonest shutdown, then leaks and worn pumps), with countdown, plan, costs and evidence; plus events resolved in the last 12 h.",
+        "description": "Every problem in progress at 'now' in SPEC order (pump failures by soonest shutdown, then leaks and worn pumps), with countdown, absolute shutdown_at and repair_due times, plan, costs and evidence; plus events resolved in the last 12 h.",
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {
         "name": "get_series",
@@ -252,8 +280,14 @@ Handoff format (Markdown, concise, plain English, times in UTC):
 ## Resolved this shift
 ## Notes        (fleet constraints, assumptions)
 
-Rules: every number must come from a tool result. Never invent events, wells or costs. If there
-are no problems, say so plainly."""
+Rules:
+- Every number, time, well and cost must come from a tool result. Never invent events or facts.
+- Use shutdown_at and repair_due exactly as given; never compute clock times yourself.
+- Repair times are estimates (failure onset + the expected repair time). Say "repair due HH:MM";
+  never describe who scheduled a repair or why.
+- Recommend only the actions the tools give (the plans and field inspections). Do not add new
+  instructions such as holding a pump, calling crews or changing setpoints.
+- If there are no problems, say so plainly."""
 
 
 # --- template fallback ----------------------------------------------------------------
@@ -353,11 +387,15 @@ def template_handoff(tb: Toolbox, reason: str | None = None) -> str:
 
 
 # --- the agent loop -------------------------------------------------------------------
-def run_agent(tb: Toolbox) -> str:
+def run_agent(tb: Toolbox, budget_s: float = TIME_BUDGET_S) -> str:
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT},
                             {"role": "user", "content": "Write the shift handoff for now."}]
+    deadline = time.time() + budget_s
     for _ in range(MAX_STEPS):
-        msg = llm_chat(messages, TOOL_SPECS)
+        left = deadline - time.time()
+        if left < 5:
+            raise TimeoutError(f"agent exceeded its {budget_s:.0f} s budget")
+        msg = llm_chat(messages, TOOL_SPECS, timeout=left)
         calls = msg.get("tool_calls") or []
         messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls} if calls
                         else {"role": "assistant", "content": msg.get("content") or ""})
@@ -383,6 +421,44 @@ def run_agent(tb: Toolbox) -> str:
     return final
 
 
+_TIME = re.compile(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)")
+_MONEY = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)")
+_NUM = re.compile(r"(?<![\w.])(\d[\d,]*(?:\.\d+)?)")
+_RATE = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s?/\s?h(?:our|r)?\b")
+_RATE_FULL = re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?\s?/\s?h(?:our|r)?\b")
+
+
+def ungrounded(markdown: str, corpus: list[str]) -> list[str]:
+    """Clock times and dollar amounts in the handoff that appear in no tool output.
+    The model is told to copy numbers from tools; this catches it when it doesn't."""
+    text = "\n".join(corpus)
+    times = {f"{int(h):02d}:{m}" for h, m in _TIME.findall(text)}
+    nums = set()
+    for n in _NUM.findall(text):
+        try:
+            nums.add(round(float(n.replace(",", ""))))
+        except ValueError:
+            pass
+    # Rates must match a rate, not just any number (a $62.5 total is not a $62.5/h rate).
+    rates = {round(float(n.replace(",", ""))) for n in _RATE.findall(text)}
+    for k in re.findall(r'"lost_revenue_per_hour":\s*([\d.]+)', text):
+        rates.add(round(float(k)))
+    bad = []
+    for h, m in _TIME.findall(markdown):
+        t = f"{int(h):02d}:{m}"
+        if t not in times and t not in bad:
+            bad.append(t)
+    for n in _RATE.findall(markdown):
+        v = round(float(n.replace(",", "")))
+        if not ({v - 1, v, v + 1} & rates) and f"${n}/h" not in bad:
+            bad.append(f"${n}/h")
+    for n in _MONEY.findall(_RATE_FULL.sub("", markdown)):
+        v = round(float(n.replace(",", "")))
+        if not ({v - 1, v, v + 1} & nums) and f"${n}" not in bad:
+            bad.append(f"${n}")
+    return bad
+
+
 def generate_handoff(ds: Dataset, events: list | None = None, extra_alerts: list[dict] | None = None,
                      use_llm: bool = True) -> dict:
     """Shift handoff for one dataset at its "now". Nemotron when a key is set, else template."""
@@ -394,6 +470,7 @@ def generate_handoff(ds: Dataset, events: list | None = None, extra_alerts: list
         try:
             md = run_agent(tb)
             return {"source": "nemotron", "model": env["NVIDIA_MODEL"], "markdown": md, "steps": tb.trace,
+                    "ungrounded": ungrounded(md, tb.corpus),
                     "now_unix": ds.now_unix, "seconds": round(time.time() - t0, 1)}
         except Exception as e:  # network, auth, quota, malformed output: fall back, never break
             reason = f"{type(e).__name__}: {str(e)[:160]}"
@@ -402,6 +479,7 @@ def generate_handoff(ds: Dataset, events: list | None = None, extra_alerts: list
     tb = Toolbox(ds, events, extra=list(extra_alerts or []))
     md = template_handoff(tb, reason)
     return {"source": "template", "model": None, "markdown": md, "steps": tb.trace, "reason": reason,
+            "ungrounded": ungrounded(md, tb.corpus),
             "now_unix": ds.now_unix, "seconds": round(time.time() - t0, 1)}
 
 

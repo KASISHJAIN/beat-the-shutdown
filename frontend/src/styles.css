@@ -330,3 +330,5 @@ code { font-size: 12px; background: var(--surface-2); padding: 0 4px; border-rad
   .modal-backdrop { padding: 0; }
   .modal { border-radius: 0; max-height: 100dvh; height: 100dvh; }
 }
+
+.md-more { margin-top: 2px; }

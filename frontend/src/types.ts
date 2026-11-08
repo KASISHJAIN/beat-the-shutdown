@@ -195,6 +195,7 @@ export interface HandoffResponse {
   reason?: string;
   markdown: string;
   steps: { tool: string; args: Record<string, unknown>; ms: number; ok: boolean }[];
+  ungrounded?: string[]; // times / $ amounts in the text that no tool output contains
   now_unix: number;
   seconds: number;
 }

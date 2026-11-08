@@ -24,6 +24,8 @@ function inline(text: string): ReactNode[] {
   return out;
 }
 
+const LIST = /^(\s*)([-*]|\d+\.)\s+(.*)$/;
+
 /** Small Markdown renderer for the handoff: headings, bullet/numbered lists (one level of
  *  nesting), and paragraphs. */
 function Markdown({ text }: { text: string }) {
@@ -40,24 +42,42 @@ function Markdown({ text }: { text: string }) {
       i++;
       continue;
     }
-    const li = /^(\s*)([-*]|\d+\.)\s+(.*)$/.exec(line);
-    if (li) {
+    const li = LIST.exec(line);
+    if (li && li[1].length < 2) {
       const ordered = /\d+\./.test(li[2]);
-      const items: { text: string; sub: string[] }[] = [];
+      const start = ordered ? parseInt(li[2], 10) : 1;
+      const items: { text: string; sub: string[]; more: string[] }[] = [];
       while (i < lines.length) {
-        const m = /^(\s*)([-*]|\d+\.)\s+(.*)$/.exec(lines[i]);
-        if (!m) break;
-        if (m[1].length >= 2 && items.length) items[items.length - 1].sub.push(m[3]);
-        else items.push({ text: m[3], sub: [] });
+        const cur = lines[i];
+        const m = LIST.exec(cur);
+        if (m && m[1].length < 2) {
+          if (/\d+\./.test(m[2]) !== ordered) break;   // a different kind of list starts
+          items.push({ text: m[3], sub: [], more: [] });
+        } else if (m && items.length) {
+          items[items.length - 1].sub.push(m[3]);     // nested bullet
+        } else if (/^\s{2,}\S/.test(cur) && items.length) {
+          items[items.length - 1].more.push(cur.trim()); // indented continuation line
+        } else if (!cur.trim()) {
+          // a blank line ends the list unless the list (or an item's continuation) carries on
+          let j = i + 1;
+          while (j < lines.length && !lines[j].trim()) j++;
+          const next = j < lines.length ? lines[j] : "";
+          const nm = LIST.exec(next);
+          const continues = (nm && (nm[1].length >= 2 || /\d+\./.test(nm[2]) === ordered)) || /^\s{2,}\S/.test(next);
+          if (!continues) break;
+        } else {
+          break;
+        }
         i++;
       }
       const children = items.map((it, k) => (
         <li key={k}>
           {inline(it.text)}
+          {it.more.map((m, j) => <div key={`m${j}`} className="md-more">{inline(m)}</div>)}
           {it.sub.length > 0 && <ul>{it.sub.map((s, j) => <li key={j}>{inline(s)}</li>)}</ul>}
         </li>
       ));
-      blocks.push(ordered ? <ol key={i}>{children}</ol> : <ul key={i}>{children}</ul>);
+      blocks.push(ordered ? <ol key={i} start={start}>{children}</ol> : <ul key={i}>{children}</ul>);
       continue;
     }
     if (line.trim()) blocks.push(<p key={i}>{inline(line)}</p>);
@@ -127,6 +147,12 @@ export function HandoffPanel({ dataset, now, onClose }: Props) {
             <>
               {res.source === "template" && res.reason && (
                 <div className="muted small template-note">Template mode ({res.reason}). Add NVIDIA_API_KEY to .env for the Nemotron agent.</div>
+              )}
+              {res.ungrounded && res.ungrounded.length > 0 && (
+                <div className="error">
+                  Check before acting: {res.ungrounded.join(", ")} {res.ungrounded.length === 1 ? "does" : "do"} not
+                  match any figure from the console's tools. The alert cards are the source of truth.
+                </div>
               )}
               <Markdown text={res.markdown} />
               <details className="why">
