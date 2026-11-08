@@ -33,6 +33,12 @@ WEAR_CUSUM_H = 8.2
 # A leak's pressure deficit appears as a step of about this fraction of the pipeline's
 # running-vs-idle pressure offset, then grows linearly (measured on history/full_week).
 LEAK_STEP_FRACTION = 0.27
+# A leak must lose real flow: the segment's mean loss (pump flow - received) must sit this
+# many noise sigmas above zero (0.5 sigma of a 12+ sample mean is ~1.7 standard errors) (or above a negative healthy baseline, for a meter that reads
+# low). Zero rather than the baseline because early in a dataset a leak can inflate the
+# baseline itself. A pressure drop with no lost flow (e.g. a worn pump's lower discharge
+# pressure) is reported by the pump detectors, not as a leak.
+LEAK_MIN_LOSS_Z = 0.5
 
 
 @dataclass
@@ -406,6 +412,9 @@ def detect_pipeline_leaks(ds: Dataset, fac: Facility) -> list[dict]:
     step = LEAK_STEP_FRACTION * offset
     out = []
     for start, last_bad, end_idx in _segments(z):
+        lost = np.mean(loss[start:max(last_bad, start) + 1]) - min(s_l.base, 0.0)
+        if lost < LEAK_MIN_LOSS_Z * s_l.sigma:
+            continue  # pressure alone, no lost flow: not a leak
         # walk back from the first flagged sample to the first leaking sample
         first = start
         while first - 1 >= 0 and s_p.z[first - 1] > 2.0 and \
