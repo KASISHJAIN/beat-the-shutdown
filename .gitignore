@@ -6,3 +6,4 @@ frontend/node_modules/
 frontend/dist/
 *.tsbuildinfo
 events.json
+firmware/**/secrets.h
