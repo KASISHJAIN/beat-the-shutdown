@@ -18,8 +18,10 @@
     - Power up with the water sensor DRY: it records "empty" automatically. "Full" is RAW_FULL.
     - It measures vibration with the pump off, runs the pump, measures it running and sets the
       stall threshold. Then the pump runs automatically between the twin's setpoints.
-    - BOOT button (GPIO 0): toggle the pump on/off. The automatic control only acts when the
-      level crosses a setpoint, so a manual toggle stays until the next crossing.
+    - Automatic control is level-based: pump ON whenever level >= start setpoint, OFF whenever
+      level <= stop setpoint (setpoints come from the server on every POST).
+    - BOOT button (GPIO 0): toggle the pump. This overrides the automatic control until the level
+      reaches the other setpoint or the server sends new setpoints.
     - Hold the wheel still to trigger pump_status 2 (pump failure).
 
   Optional serial keys (if your monitor doesn't reset the board):
@@ -46,7 +48,7 @@
 // ---------------- calibration constant ----------------
 // Raw ADC reading with the sensor in water up to your "full" mark (bench sketch: 'f', or read
 // raw= in the serial log). Replace with your measured number.
-constexpr int RAW_FULL = 3000;
+constexpr int RAW_FULL = 330;
 
 // ---------------- pins ----------------
 constexpr int PIN_LVL_PWR = 5, PIN_LVL_SIG = 4;
@@ -73,7 +75,8 @@ unsigned long pumpStartMs = 0;
 int lowCount = 0;
 int pumpStatus = 0;           // 0 stopped, 1 running, 2 fault
 float startPct = 70, stopPct = 30;
-int levelZone = 1;            // 0 at/below stop, 1 between, 2 at/above start
+bool manualOverride = false;  // BOOT pressed: automatic control paused
+int overrideZone = 1;         // level zone when BOOT was pressed (0 <= stop, 1 between, 2 >= start)
 bool lastBtn = HIGH;
 unsigned long lastBtnChange = 0;
 float lastLevel = 0, lastVib = 0;
@@ -166,13 +169,25 @@ int zoneOf(float level) {
   return 1;
 }
 
-// Automatic control acts only on setpoint crossings, so a BOOT-button toggle sticks.
+// Level-based control: pump ON whenever level >= start, OFF whenever level <= stop, unchanged
+// in between. A BOOT press overrides it until the level reaches a different setpoint than the
+// one it was at when pressed, or the server sends new setpoints.
 void autoControl(float level) {
   int z = zoneOf(level);
-  if (z != levelZone) {
-    if (z == 2 && !pumpOn) { setPump(true); Serial.println("auto: level reached start setpoint, pump ON"); }
-    if (z == 0 && pumpOn) { setPump(false); Serial.println("auto: level reached stop setpoint, pump OFF"); }
-    levelZone = z;
+  if (manualOverride) {
+    if (z != 1 && z != overrideZone) {
+      manualOverride = false;
+      Serial.printf("override ended: level %.1f%% reached the %s setpoint\n", level, z == 2 ? "start" : "stop");
+    } else {
+      return;
+    }
+  }
+  if (z == 2 && !pumpOn) {
+    setPump(true);
+    Serial.printf("auto: level %.1f%% >= start %.0f%%, pump ON\n", level, startPct);
+  } else if (z == 0 && pumpOn) {
+    setPump(false);
+    Serial.printf("auto: level %.1f%% <= stop %.0f%%, pump OFF\n", level, stopPct);
   }
 }
 
@@ -190,7 +205,10 @@ void checkButton() {
     lastBtnChange = millis();
     if (lastBtn == HIGH && btn == LOW) {
       setPump(!pumpOn);
-      Serial.println(pumpOn ? "BOOT button: pump ON" : "BOOT button: pump OFF");
+      manualOverride = true;
+      overrideZone = zoneOf(lastLevel);
+      Serial.printf("BOOT button: pump %s (manual until the level reaches the other setpoint)\n",
+                    pumpOn ? "ON" : "OFF");
     }
     lastBtn = btn;
   }
@@ -242,11 +260,26 @@ void postSample(float level, int status, float vib) {
   int code = http.POST((uint8_t *)body, strlen(body));
   if (code == 200) {
     String reply = http.getString();
-    float f;
-    if (jsonNumber(reply, "start_level_pct", f)) startPct = f;
-    if (jsonNumber(reply, "stop_level_pct", f)) stopPct = f;
+    float s = startPct, p = stopPct, n = 0;
+    bool gotS = jsonNumber(reply, "start_level_pct", s), gotP = jsonNumber(reply, "stop_level_pct", p);
+    jsonNumber(reply, "samples", n);
+    if (gotS && gotP && s > p && s <= 100 && p >= 0) {
+      if (s != startPct || p != stopPct) {
+        if (manualOverride) Serial.println("override ended: new setpoints from the server");
+        manualOverride = false;
+        startPct = s;
+        stopPct = p;
+      }
+      Serial.printf("POST ok (200), server has %.0f samples, setpoints start %.0f%% / stop %.0f%%\n",
+                    n, startPct, stopPct);
+    } else {
+      Serial.printf("POST ok (200) but setpoints missing or invalid in reply, keeping %.0f/%.0f: %s\n",
+                    startPct, stopPct, reply.substring(0, 120).c_str());
+    }
+  } else if (code > 0) {
+    Serial.printf("POST FAILED: HTTP %d from %s: %s\n", code, serverUrl.c_str(), http.getString().substring(0, 120).c_str());
   } else {
-    Serial.printf("POST %s -> %d\n", serverUrl.c_str(), code);
+    Serial.printf("POST FAILED: %s (%s)\n", HTTPClient::errorToString(code).c_str(), serverUrl.c_str());
   }
   http.end();
 }
@@ -312,7 +345,6 @@ void setup() {
   setPump(false);
 
   autoCalibrate();
-  levelZone = zoneOf(levelPct(readLevelRaw()));
 
   serverUrl = String("http://") + SERVER_HOST + ":" + String(SERVER_PORT) + "/twin/ingest";
   connectWifi();
@@ -333,8 +365,9 @@ void loop() {
     lastPost = millis();
     if (WiFi.status() != WL_CONNECTED) connectWifi();
     postSample(lastLevel, pumpStatus, lastVib);
-    Serial.printf("level_pct=%.1f raw=%d vib=%.4f thr=%.4f pump_cmd=%d status=%d%s\n",
+    Serial.printf("level_pct=%.1f raw=%d vib=%.4f thr=%.4f pump_cmd=%d status=%d%s%s\n",
                   lastLevel, lastRaw, lastVib, vibThreshold, pumpOn, pumpStatus,
+                  manualOverride ? " (manual)" : "",
                   pumpStatus == 2 ? "  <-- PUMP FAILURE" : "");
   }
   delay(LOOP_DELAY_MS);
