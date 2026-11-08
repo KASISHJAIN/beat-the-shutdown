@@ -139,15 +139,16 @@ detector, using only data up to that moment, measured from the answer key's true
 |---|---|---|---|---|---|
 | Pump failure | 13 | 0 min | 0 min | 0 min | 0 min |
 | Pipeline leak | 5 | 30 min | 90 min | 25 min | 30 min |
-| Worn pump | 5 | 140 min | 165 min | 35 min | 115 min |
+| Worn pump | 5 | 150 min | 170 min | 45 min | 130 min |
 
 Leaks and worn pumps can only be seen while the pump runs (no flow, no signal), so part of each
 lag is time the pump sat idle. EVENT_1's 90 min, for example, is 60 min with the pump off plus
 30 min of detection. A worn pump loses only about 0.4 % of its flow per hour, so the evidence
 builds slowly. Worn pumps are flagged by a CUSUM of the flow-ratio and discharge-pressure drop,
-which accumulates a sustained decline. Its threshold is 1.5x the highest value seen on any
-healthy pump, which cut the median from 170 to 140 min and the worst case from 225 to 165 min
-with no new false alarms. An early flag starts at about 40 % confidence and climbs (86 % an hour
+which accumulates a sustained decline. Its threshold is 2x the highest value seen on any
+healthy pump, leaving margin for noisier pumps on an unseen network. That cut the median from
+170 to 150 min and the worst case from 225 to 170 min, with no new false alarms in the sweep,
+the snapshots, `mock_test` or with 3 % of readings dropped. An early flag starts at about 40 % confidence and climbs (86 % an hour
 later, 100 % within a few hours) as the trend firms up. Each leak and wear alert in the console shows
 "Detected X after onset". There, onset is the app's own estimate, since the true onset isn't
 known live.

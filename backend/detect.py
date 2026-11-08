@@ -27,9 +27,9 @@ CLEAR_WINDOW = 6
 MIN_FLAGGED = 6        # a segment needs at least this many flagged running samples
 SAMPLE_Z = 3.0         # a single sample this far out is unambiguously faulty
 # Worn pumps: CUSUM of the combined z (flow ratio + discharge pressure). On full_week the healthy
-# maximum is ~4.1 at k = 0.5, so H = 6.15 (1.5x) flags wear early without false alarms.
+# maximum is ~4.1 at k = 0.5; H = 8.2 (2x) leaves margin for noisier pumps on unseen networks.
 WEAR_CUSUM_K = 0.5
-WEAR_CUSUM_H = 6.15
+WEAR_CUSUM_H = 8.2
 # A leak's pressure deficit appears as a step of about this fraction of the pipeline's
 # running-vs-idle pressure offset, then grows linearly (measured on history/full_week).
 LEAK_STEP_FRACTION = 0.27
