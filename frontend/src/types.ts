@@ -164,3 +164,26 @@ export interface PlanResponse {
   plan: Plan | null;
   whatif: WhatIf | null;
 }
+
+export interface TwinStatus {
+  dataset: string;
+  configured: boolean;
+  online: boolean;
+  samples: number;
+  facility_id: string;
+  setpoints: { start_level_pct: number; stop_level_pct: number; warning_pct: number; shutdown_pct: number };
+  now_unix: number | null;
+  age_s?: number;
+  last: { ts: number; level_pct: number; pump_status: number; vibration: number } | null;
+  system: System | null;
+  warning_pct?: number;
+  shutdown_pct?: number;
+  alerts: EventRecord[];
+}
+
+/** An alert plus where its clock comes from (the dataset's "now" or the live twin's). */
+export interface ClockedAlert extends EventRecord {
+  live?: boolean;
+  clockNow: number;
+  clockLoadedAt: number;
+}

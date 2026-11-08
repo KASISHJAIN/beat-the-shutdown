@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from .alerts import build
 from .detect import detect_events
 from .loader import Dataset, load_dataset, truncate
 from .optimize import plan_ongoing, replay_onset_plans, well_revenue_per_hour, whatif
+from . import twin as twin_mod
+from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = Path(os.environ.get("BTS_DATA_ROOT", ROOT / "HackUTD-ZeroDay")).resolve()
@@ -57,6 +60,12 @@ def _kind(dataset_id: str) -> str:
 
 
 def _full(dataset_id: str) -> Dataset:
+    if dataset_id == twin_mod.DATASET_ID:
+        st = twin_mod.store()
+        ds = st.dataset() if st else None
+        if ds is None:
+            raise HTTPException(404, "no twin data yet: POST samples to /twin/ingest")
+        return ds
     folders = _discover()
     if dataset_id not in folders:
         raise HTTPException(404, f"unknown dataset {dataset_id!r}; see /api/datasets")
@@ -72,23 +81,41 @@ def _snap_now(full: Dataset, now: int | None) -> int:
     return full.start_unix + (now - full.start_unix) // full.step_s * full.step_s
 
 
+def _ver(dataset_id: str) -> int:
+    """Cache-key salt: the twin's ingest counter (it changes as samples arrive)."""
+    st = twin_mod.store() if dataset_id == twin_mod.DATASET_ID else None
+    return st.version if st else 0
+
+
 @lru_cache(maxsize=64)
-def _cut(dataset_id: str, now: int) -> tuple[Dataset, list]:
+def _cut_v(dataset_id: str, now: int, ver: int) -> tuple[Dataset, list]:
     ds = _full(dataset_id)
     cut = ds if now == ds.now_unix else truncate(ds, now)
     return cut, detect_events(cut)
 
 
+def _cut(dataset_id: str, now: int) -> tuple[Dataset, list]:
+    return _cut_v(dataset_id, now, _ver(dataset_id))
+
+
 @lru_cache(maxsize=64)
-def _alerts(dataset_id: str, now: int) -> dict:
+def _alerts_v(dataset_id: str, now: int, ver: int) -> dict:
     ds, events = _cut(dataset_id, now)
     return build(ds, events, include_resolved_plans=False)
 
 
 @lru_cache(maxsize=16)
-def _events(dataset_id: str, now: int) -> dict:
+def _events_v(dataset_id: str, now: int, ver: int) -> dict:
     ds, events = _cut(dataset_id, now)
     return build(ds, events, include_resolved_plans=True)
+
+
+def _alerts(dataset_id: str, now: int) -> dict:
+    return _alerts_v(dataset_id, now, _ver(dataset_id))
+
+
+def _events(dataset_id: str, now: int) -> dict:
+    return _events_v(dataset_id, now, _ver(dataset_id))
 
 
 def _ctx(dataset: str, now: int | None) -> tuple[str, int]:
@@ -123,7 +150,10 @@ def datasets():
         out.append({"id": k, "label": k.split("/")[-1], "kind": _kind(k)})
     order = {"test": 0, "full_week": 1, "mock_test": 2, "snapshot": 3, "other": 4}
     out.sort(key=lambda d: (order[d["kind"]], d["id"]))
-    return {"data_root": str(DATA_ROOT), "datasets": out}
+    st = twin_mod.store()
+    return {"data_root": str(DATA_ROOT), "datasets": out,
+            "twin": {"id": twin_mod.DATASET_ID, "configured": st is not None,
+                     "samples": len(st.samples) if st else 0}}
 
 
 @app.get("/api/network")
@@ -203,7 +233,7 @@ def series(dataset: str, asset: str, metric: str = Query(..., description="one o
     out = {}
     for m in [m.strip() for m in metric.split(",") if m.strip()]:
         if not ds.has(asset, m):
-            raise HTTPException(404, f"no series {asset}.{m}")
+            continue  # e.g. the twin has no flow or pressure sensors
         s = ds.series(asset, m).loc[lo:now]
         stride = max(1, math.ceil(len(s) / max_points))
         s = s.iloc[::stride]
@@ -231,6 +261,54 @@ def plan(dataset: str, event_id: str, now: int | None = None):
         raise HTTPException(409, "repair already finished; nothing to plan")
     return _clean({"event_id": event_id, "status": ev.status, "plan": p.to_dict(),
                    "whatif": whatif(base, ev, p)})
+
+
+# --- live twin ------------------------------------------------------------------------
+class TwinSample(BaseModel):
+    level_pct: float = Field(..., ge=-5, le=105, description="tank level, %")
+    pump_status: int = Field(..., ge=0, le=2, description="0 stopped, 1 running, 2 fault")
+    vibration: float = Field(0.0, ge=0, description="std-dev of acceleration magnitude (g)")
+    ts: float | None = Field(None, description="epoch s or ms; omit or send millis() to use receive time")
+
+
+def _twin_store():
+    st = twin_mod.store()
+    if st is None:
+        raise HTTPException(404, "twin not configured (twin_config.json missing)")
+    return st
+
+
+@app.post("/twin/ingest")
+def twin_ingest(sample: TwinSample):
+    """The ESP32 posts here every ~2 s. Replies with the setpoints so the device stays in sync."""
+    st = _twin_store()
+    s = st.ingest(sample.level_pct, sample.pump_status, sample.vibration, sample.ts)
+    return {"ok": True, "ts": s.ts, "samples": len(st.samples), **st.setpoints()}
+
+
+@app.post("/twin/reset")
+def twin_reset():
+    _twin_store().reset()
+    return {"ok": True}
+
+
+@app.get("/api/twin")
+def twin_status():
+    """Everything the console shows for the live twin: status, last reading, alerts with plans."""
+    st = _twin_store()
+    base = {"dataset": twin_mod.DATASET_ID, "configured": True, "online": st.online(),
+            "samples": len(st.samples), "setpoints": st.setpoints(),
+            "facility_id": st.facility_id}
+    if st.dataset() is None:
+        return {**base, "last": None, "alerts": [], "system": None, "now_unix": None}
+    last = st.samples[-1]
+    net = network(twin_mod.DATASET_ID)
+    al = alerts(twin_mod.DATASET_ID)
+    return _clean({**base, "now_unix": al["now_unix"], "age_s": round(max(0.0, time.time() - st.last_received), 1),
+                   "last": {"ts": last.ts, "level_pct": last.level_pct, "pump_status": last.pump_status,
+                            "vibration": last.vibration},
+                   "system": net["systems"][0], "warning_pct": net["warning_pct"],
+                   "shutdown_pct": net["shutdown_pct"], "alerts": al["alerts"]})
 
 
 @app.get("/api/health")

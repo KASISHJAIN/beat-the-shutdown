@@ -1,0 +1,33 @@
+{
+  "_comment": "Hardware twin (ESP32). One facility in its own system. Times are demo-scale so a pump stall plays out in a couple of minutes; volumes are notional barrels mapped onto the physical tank's 0-100 %. Edit freely.",
+  "system": {
+    "id": "TWIN",
+    "center": [31.95, -101.95],
+    "truck_yard": [31.86, -101.86],
+    "disposal_site": {"id": "TWIN_DISPOSAL", "lat": 31.99, "lon": -101.90, "pressure_psi": 1000}
+  },
+  "facility": {
+    "id": "TWIN_FACILITY",
+    "lat": 31.95,
+    "lon": -101.95,
+    "tank": {"id": "TWIN_TANK", "capacity_bbl": 100},
+    "pump": {"id": "TWIN_PUMP", "max_flow_bpd": 100000, "start_level_pct": 70, "stop_level_pct": 30},
+    "pipeline": {"id": "TWIN_PIPELINE", "max_bpd": 120000, "max_pressure_psi": 1700},
+    "wells": [
+      {"id": "TWIN_WELL_1", "baseline_water_bpd": 30000, "oil_bpd": 300, "gas_mcfd": 1000},
+      {"id": "TWIN_WELL_2", "baseline_water_bpd": 25000, "oil_bpd": 150, "gas_mcfd": 500},
+      {"id": "TWIN_WELL_3", "baseline_water_bpd": 15000, "oil_bpd": 400, "gas_mcfd": 1500}
+    ]
+  },
+  "tank_limits_pct": {"warning": 85, "shutdown": 92},
+  "ops": {
+    "prices": {"oil_per_bbl": 60, "gas_per_mcf": 3.0},
+    "expected_repair_hours": {"pump_failure": 0.05},
+    "emergency_trucking": {"truck_capacity_bbl": 20, "cost_per_trip": 905},
+    "emergency_fleet_size": 2,
+    "response_min": 0.5,
+    "cycle_min": 1.0
+  },
+  "online_timeout_s": 10,
+  "max_samples": 10800
+}

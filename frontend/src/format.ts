@@ -8,6 +8,11 @@ export function hhmm(unix: number): string {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
+export function hhmmss(unix: number): string {
+  const d = new Date(unix * 1000);
+  return `${hhmm(unix)}:${pad(d.getUTCSeconds())}`;
+}
+
 export function dayTime(unix: number): string {
   const d = new Date(unix * 1000);
   return `${DAYS[d.getUTCDay()]} ${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${hhmm(unix)}`;

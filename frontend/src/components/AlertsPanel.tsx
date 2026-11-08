@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
-import type { Action, EventRecord, Network } from "../types";
-import { CATEGORY_LABEL, clock, dayTime, hhmm, hoursText, money } from "../format";
+import type { Action, ClockedAlert, EventRecord, Network, TwinStatus } from "../types";
+import { CATEGORY_LABEL, clock, dayTime, hhmm, hhmmss, hoursText, money } from "../format";
 import { TankBar } from "./TankBar";
 
 interface Props {
-  alerts: EventRecord[];
+  alerts: ClockedAlert[]; // dataset alerts and live-twin alerts, already in SPEC order
   network: Network | null;
   nowUnix: number;
-  loadedAt: number; // wall-clock ms when this data arrived; the countdown ticks from there
+  twin: TwinStatus | null;
   selectedFacility: string | null;
-  onSelect: (facilityId: string, eventId: string) => void;
+  onSelect: (facilityId: string, eventId?: string) => void;
   error: string | null;
 }
 
@@ -23,8 +23,6 @@ function useTick(ms = 1000) {
 
 export function AlertsPanel(p: Props) {
   useTick();
-  const elapsed = (Date.now() - p.loadedAt) / 1000;
-  const live = p.nowUnix + elapsed;
   const failures = p.alerts.filter((a) => a.category === "pump_failure");
   const leaks = p.alerts.filter((a) => a.category === "pipeline_leak");
   const worn = p.alerts.filter((a) => a.category === "pump_degradation");
@@ -40,6 +38,7 @@ export function AlertsPanel(p: Props) {
           <span className="count sev-warning-text">{worn.length} worn</span>
         </div>
       </div>
+      {p.twin?.configured && <TwinStrip twin={p.twin} onSelect={p.onSelect} />}
       {p.error && <div className="error">Could not load alerts: {p.error}</div>}
       {!p.error && !p.network && (
         <div className="empty"><span className="spinner" /> <div>Loading the network…</div></div>
@@ -57,7 +56,9 @@ export function AlertsPanel(p: Props) {
         {p.alerts.map((a) => (
           <li key={a.event_id}>
             {a.category === "pump_failure" ? (
-              <FailureCard a={a} live={live} warning={warning} shutdown={shutdown}
+              <FailureCard a={a} live={a.clockNow + (Date.now() - a.clockLoadedAt) / 1000}
+                warning={a.live ? p.twin?.setpoints.warning_pct ?? warning : warning}
+                shutdown={a.live ? p.twin?.setpoints.shutdown_pct ?? shutdown : shutdown}
                 selected={p.selectedFacility === a.facility_id} onSelect={p.onSelect} />
             ) : (
               <InspectionCard a={a} nowUnix={p.nowUnix}
@@ -71,7 +72,7 @@ export function AlertsPanel(p: Props) {
 }
 
 function FailureCard({ a, live, warning, shutdown, selected, onSelect }: {
-  a: EventRecord; live: number; warning: number; shutdown: number; selected: boolean;
+  a: ClockedAlert; live: number; warning: number; shutdown: number; selected: boolean;
   onSelect: Props["onSelect"];
 }) {
   const plan = a.plan;
@@ -90,9 +91,10 @@ function FailureCard({ a, live, warning, shutdown, selected, onSelect }: {
           <div className="card-kicker">
             <span className={`sev-pill sev-${sev}`}>{sev === "critical" ? "Critical" : "High"}</span>
             {CATEGORY_LABEL[a.category]}
+            {a.live && <LiveBadge />}
           </div>
           <h3>{a.facility_id}</h3>
-          <div className="card-sub">{a.asset_id} · since {hhmm(a.onset_unix)} UTC</div>
+          <div className="card-sub">{a.asset_id} · since {(a.live ? hhmmss : hhmm)(a.onset_unix)} UTC</div>
         </div>
         <button className="btn btn-small" onClick={() => onSelect(a.facility_id, a.event_id)}>Details</button>
       </header>
@@ -231,5 +233,36 @@ function InspectionCard({ a, nowUnix, selected, onSelect }: {
         {a.recommended_actions.map((x, i) => <li key={i} className={`action action-${x.type}`}>{actionText(x, nowUnix)}</li>)}
       </ul>
     </article>
+  );
+}
+
+function LiveBadge() {
+  return <span className="live-badge" title="Streaming from the hardware twin"><i />Live</span>;
+}
+
+const PUMP_STATE: Record<number, string> = { 0: "stopped", 1: "running", 2: "FAULT" };
+
+/** Always-on strip for the hardware twin: online state and its latest reading. */
+function TwinStrip({ twin, onSelect }: { twin: TwinStatus; onSelect: Props["onSelect"] }) {
+  const l = twin.last;
+  return (
+    <div className={`twin-strip ${twin.online ? "twin-online" : "twin-offline"}`}>
+      <div className="twin-head">
+        {twin.online ? <LiveBadge /> : <span className="tag tag-unverified">Offline</span>}
+        <strong>Hardware twin</strong>
+        <span className="muted small">{twin.facility_id}</span>
+        {l && <button className="btn btn-small" onClick={() => onSelect(twin.facility_id)}>Details</button>}
+      </div>
+      {l ? (
+        <div className="twin-readings">
+          <span>Tank <strong>{l.level_pct.toFixed(1)}%</strong></span>
+          <span>Pump <strong className={l.pump_status === 2 ? "sev-critical-text" : ""}>{PUMP_STATE[l.pump_status] ?? l.pump_status}</strong></span>
+          <span>Vibration <strong>{l.vibration.toFixed(3)} g</strong></span>
+          <span className="muted">{twin.online ? `${(twin.age_s ?? 0).toFixed(0)} s ago` : `last ${hhmmss(l.ts)} UTC`}</span>
+        </div>
+      ) : (
+        <div className="muted small">Waiting for the ESP32 (or <code>python scripts/fake_twin.py</code>) to post to /twin/ingest.</div>
+      )}
+    </div>
   );
 }

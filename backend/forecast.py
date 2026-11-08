@@ -143,6 +143,7 @@ def tank_state(ds: Dataset, fac: Facility) -> TankState:
             level, level_se = prev, prev_se
         else:
             level, level_se = float(cur[-1]), 0.1
+    level = float(np.clip(level, 0.0, 100.0))  # a tank cannot read past empty or full
     return TankState(fac.id, ds.now_unix, level, level_se, inflow_bpd, inflow_sd,
                      fac.capacity_bbl, ds.shutdown_pct, well_bpd, shut)
 
@@ -175,5 +176,5 @@ def hours_to_limit(st: TankState) -> dict:
     rel_head = (st.level_sd / 100 * st.capacity_bbl) / head if head > 0 else 0
     rel_rate = st.inflow_sd / st.inflow_bpd if st.inflow_bpd > 0 else 0
     rel = float(np.hypot(rel_head, rel_rate))
-    return {"p10": round(max(p50 * (1 - Z90 * rel), 0), 2), "p50": round(p50, 2),
-            "p90": round(p50 * (1 + Z90 * rel), 2)}
+    return {"p10": round(max(p50 * (1 - Z90 * rel), 0), 4), "p50": round(p50, 4),
+            "p90": round(p50 * (1 + Z90 * rel), 4)}

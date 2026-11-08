@@ -11,6 +11,7 @@ interface Props {
   selected: string | null;
   onSelect: (facilityId: string) => void;
   layoutKey: string; // changes when the container is resized/shown, so Leaflet re-measures
+  live?: Set<string>; // facilities streaming live (hardware twin)
 }
 
 const SEV_RANK: Record<string, number> = { critical: 0, high: 1, urgent: 2, warning: 3, ok: 4 };
@@ -51,7 +52,7 @@ function shapeIcon(kind: "disposal" | "yard", color: string): L.DivIcon {
   return L.divIcon({ className: "map-icon", html: shape, iconSize: [18, 18], iconAnchor: [9, 9], tooltipAnchor: [8, 0] });
 }
 
-export function MapView({ network, palette, selected, onSelect, layoutKey }: Props) {
+export function MapView({ network, palette, selected, onSelect, layoutKey, live }: Props) {
   const center: [number, number] = network?.systems[0]?.center ?? [31.8, -102.3];
   const facs = useMemo(() => {
     const out: (Facility & { system: string; disposal: [number, number] })[] = [];
@@ -96,17 +97,22 @@ export function MapView({ network, palette, selected, onSelect, layoutKey }: Pro
         {facs.map((f) => {
           const col = palette.sev[f.severity] ?? palette.sev.ok;
           const isSel = selected === f.id;
-          return (
+          const isLive = live?.has(f.id) ?? false;
+          return [
+            isLive && (
+              <CircleMarker key={`l-${f.id}`} center={[f.lat, f.lon]} radius={18} interactive={false}
+                pathOptions={{ color: palette.sev.critical, weight: 2, fill: false, className: "live-ring" }} />
+            ),
             <CircleMarker key={`f-${f.id}`} center={[f.lat, f.lon]}
               radius={isSel ? 13 : f.severity === "ok" ? 8 : 11}
               pathOptions={{ color: isSel ? palette.text : "#ffffff", weight: isSel ? 3 : 2, fillColor: col, fillOpacity: 0.95 }}
               eventHandlers={{ click: () => onSelect(f.id) }}>
               <Tooltip direction="top" offset={[0, -8]}>
-                <strong>{f.id}</strong><br />
+                <strong>{f.id}</strong>{isLive ? " · LIVE twin" : ""}<br />
                 {CATEGORY_LABEL[f.status]} · tank {pct(f.level_pct)}
               </Tooltip>
-            </CircleMarker>
-          );
+            </CircleMarker>,
+          ];
         })}
       </MapContainer>
       <div className="legend" aria-label="Legend">

@@ -26,7 +26,7 @@ export function WhatIf({ whatif: w, plan, palette: c, replay }: Props) {
             <CartesianGrid stroke={c.grid} strokeDasharray="3 3" />
             <XAxis dataKey="t" type="number" domain={[w.start_unix, w.repair_end_unix]} tickFormatter={hhmm}
               stroke={c.muted} tick={{ fontSize: 11 }} allowDuplicatedCategory={false} />
-            <YAxis domain={[(min: number) => Math.max(0, Math.floor(min / 10) * 10), 100]} stroke={c.muted}
+            <YAxis domain={[(min: number) => Math.max(0, Math.floor(Math.min(min, w.warning_pct - 15) / 10) * 10), 100]} stroke={c.muted}
               tick={{ fontSize: 11 }} unit="%" />
             <Tooltip labelFormatter={(t) => `${hhmm(Number(t))} UTC`}
               formatter={(v) => (typeof v === "number" ? `${v.toFixed(1)}%` : String(v))}

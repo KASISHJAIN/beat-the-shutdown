@@ -5,6 +5,7 @@ import type {
   Network,
   PlanResponse,
   SeriesResponse,
+  TwinStatus,
 } from "./types";
 
 const BASE = (import.meta as { env?: Record<string, string> }).env?.VITE_API_BASE ?? "";
@@ -28,7 +29,7 @@ async function get<T>(path: string, params: Record<string, string | number | und
 }
 
 export const api = {
-  datasets: () => get<{ datasets: Dataset[] }>("/api/datasets", {}),
+  datasets: () => get<{ datasets: Dataset[]; twin?: { id: string; configured: boolean } }>("/api/datasets", {}),
   network: (dataset: string, now?: number | null) => get<Network>("/api/network", { dataset, now }),
   alerts: (dataset: string, now?: number | null) => get<AlertsResponse>("/api/alerts", { dataset, now }),
   events: (dataset: string, now?: number | null, facility_id?: string) =>
@@ -37,4 +38,5 @@ export const api = {
     get<SeriesResponse>("/api/series", { dataset, asset, metric: metrics.join(","), now, hours }),
   plan: (dataset: string, event_id: string, now?: number | null) =>
     get<PlanResponse>("/api/plan", { dataset, event_id, now }),
+  twin: () => get<TwinStatus>("/api/twin", {}),
 };

@@ -66,6 +66,38 @@ switcher, including `test/` once it has been pulled (`git -C HackUTD-ZeroDay pul
 
 Deep links: `?dataset=history/full_week&now=1791460800&facility=S2_FACILITY_A&theme=dark`.
 
+## Live hardware twin
+
+An ESP32 (see `firmware/`) streams one extra facility, `TWIN_FACILITY` in its own system
+`TWIN`. Every ~2 s it posts to `POST /twin/ingest`:
+
+```json
+{"level_pct": 54.2, "pump_status": 1, "vibration": 0.31, "ts": 1794101999}
+```
+
+`pump_status` is 0 stopped, 1 running, 2 fault. `vibration` is the standard deviation of the
+acceleration magnitude in g. `ts` is optional: epoch seconds or ms, and anything else (such as
+`millis()`) falls back to the server's receive time. The reply carries the pump setpoints so the
+device stays in sync.
+
+The twin's tank size, setpoints, wells, prices, repair time and truck fleet come from
+`twin_config.json`, at demo scale so a stall plays out in a couple of minutes. The device has no
+flow meter, so inflow is estimated from how fast the level rises while the pump isn't running.
+The same detection, countdown and planning code then runs on the twin. The console shows it with
+a **LIVE** badge: a status strip above the alerts, its alerts merged in SPEC order, a pulsing ring
+on the map, and a detail view with a vibration chart.
+
+No hardware? Simulate it, including a pump stall:
+
+```bash
+python scripts/fake_twin.py --reset                         # real time, stalls after ~90 s
+python scripts/fake_twin.py --reset --stall-after 20        # stall sooner
+python scripts/fake_twin.py --url http://<laptop-ip>:8000/twin/ingest
+```
+
+Run uvicorn with `--host 0.0.0.0` so the ESP32 can reach the laptop. Use `POST /twin/reset` to
+clear the twin's history and `GET /api/twin` to see its status.
+
 ## Check accuracy
 
 ```bash
