@@ -26,7 +26,7 @@ flowchart LR
         T[telemetry.csv]
     end
     ESP["ESP32-S3 twin<br/>level, pump status, vibration"] -- "POST /twin/ingest every 2 s" --> TW[twin.py<br/>live facility]
-    N & O & T --> L[loader.py<br/>"now" = last ts_unix]
+    N & O & T --> L["loader.py<br/>now = last ts_unix"]
     L --> D[detect.py<br/>failures, leaks, worn pumps]
     TW --> D
     D --> F[forecast.py<br/>hours_to_limit p10/p50/p90]
