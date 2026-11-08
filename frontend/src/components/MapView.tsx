@@ -28,7 +28,7 @@ function FitBounds({ network, dataset, layoutKey, selected }: {
       pts.push([s.disposal.lat, s.disposal.lon], s.truck_yard);
       for (const f of s.facilities) pts.push([f.lat, f.lon]);
     }
-    if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [24, 24] });
+    if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [24, 24], maxZoom: 11 });
     if (selected) map.panInside(selected, { padding: [40, 40] });
     // refit when the dataset or the layout changes, not on every time-travel step
   }, [dataset, layoutKey, map, network === null]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -68,7 +68,7 @@ export function MapView({ network, palette, selected, onSelect, layoutKey, live 
   return (
     <section className="panel map-panel" aria-label="Map">
       <MapContainer center={center} zoom={9} className="map" zoomControl={true} attributionControl={true}>
-        <TileLayer key={palette.tiles} url={palette.tiles} attribution={palette.tileAttribution} />
+        <TileLayer key={palette.tiles} url={palette.tiles} attribution={palette.tileAttribution} maxNativeZoom={16} maxZoom={18} />
         <FitBounds network={network} dataset={network?.dataset ?? ""} layoutKey={layoutKey}
           selected={selFac ? [selFac.lat, selFac.lon] : null} />
         <Resize k={layoutKey} />
