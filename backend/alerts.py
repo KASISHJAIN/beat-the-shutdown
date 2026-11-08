@@ -32,9 +32,8 @@ def _event_record(ds: Dataset, e: Event, plan: Plan | None, ongoing_failure: boo
             st = tank_state(ds, fac)
             rec["level_pct"] = round(st.level_pct, 1)
             rec["hours_to_limit"] = hours_to_limit(st)
-            rec["lost_revenue_per_hour"] = round(facility_revenue_per_hour(ds, fac, st), 2)
-        else:
-            rec["lost_revenue_per_hour"] = round(facility_revenue_per_hour(ds, fac), 2)
+        # the facility's whole production (what a trip shuts in); also the alerts tie-break
+        rec["lost_revenue_per_hour"] = round(facility_revenue_per_hour(ds, fac), 2)
         if plan is not None:
             rec["recommended_actions"] = plan.actions()
             rec["est_cost"] = round(plan.cost, 2)

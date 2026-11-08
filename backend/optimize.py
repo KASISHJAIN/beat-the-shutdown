@@ -51,6 +51,7 @@ class Plan:
     explanation: str = ""
     alternatives: list[str] = field(default_factory=list)
     already_tripped: bool = False     # tank was at shutdown before the plan started
+    nothing_cost: float = 0.0         # cost of doing nothing (automatic shut-in), for comparison
 
     @property
     def cost(self) -> float:
@@ -113,6 +114,7 @@ class Plan:
                 "shutins": [{"well": w, "start_after_min": s} for w, s in self.shutins],
                 "trips_at_unix": self.trips_at_unix, "peak_pct": round(self.peak_pct, 1),
                 "trucks_free": self.trucks_free, "busy_until_unix": self.busy_until_unix,
+                "nothing_cost": round(self.nothing_cost, 2),
                 "plan_start_unix": self.start_unix, "horizon_min": round(self.horizon_min, 1),
                 "recommended_actions": self.actions(), "explanation": self.explanation,
                 "alternatives": self.alternatives}
@@ -163,6 +165,46 @@ def simulate(st: TankState, horizon_min: float, arrivals: list[tuple[float, floa
         elif kind == 2:
             break
     return None, peak
+
+
+def trajectory(st: TankState, horizon_min: float, arrivals: list[tuple[float, float]],
+               shutins: list[tuple[float, float]], step_min: float = 5.0) -> list[tuple[float, float]]:
+    """Tank level (%) over [0, horizon] for the what-if chart, with truck drops shown as steps.
+    If the tank reaches shutdown, the wells shut in automatically and the level holds."""
+    cap = st.capacity_bbl
+    vol, lim = st.volume_bbl, st.limit_bbl
+    rate = st.inflow_bpd / 1440.0
+    tripped = vol >= lim - EPS_BBL
+    marks = sorted([(t, 0, b) for t, b in arrivals if t < horizon_min]
+                   + [(t, 1, q) for t, q in shutins if t < horizon_min])
+    grid = [i * step_min for i in range(int(horizon_min // step_min) + 1)] + [horizon_min]
+    pts: list[tuple[float, float]] = [(0.0, vol / cap * 100)]
+    t, mi = 0.0, 0
+    for g in grid[1:]:
+        while mi < len(marks) and marks[mi][0] <= g:
+            te, kind, x = marks[mi]
+            vol = min(vol + (0 if tripped else rate) * (te - t), lim) if not tripped else vol
+            if not tripped and vol >= lim - EPS_BBL:
+                tripped = True
+            t = te
+            pts.append((t, vol / cap * 100))
+            if kind == 0 and not tripped:
+                vol -= min(x, vol)
+                pts.append((t, vol / cap * 100))
+            elif kind == 1:
+                rate -= x / 1440.0
+            mi += 1
+        if not tripped:
+            nv = vol + rate * (g - t)
+            if nv >= lim - EPS_BBL and rate > 0:
+                tt = t + (lim - vol) / rate
+                pts.append((tt, lim / cap * 100))
+                vol, tripped = lim, True
+            else:
+                vol = nv
+        t = g
+        pts.append((t, vol / cap * 100))
+    return pts
 
 
 # --- single-event search ---------------------------------------------------------------
@@ -320,6 +362,7 @@ def plan_system(ds: Dataset, events: list, trucks_free: int, start_unix: int | N
     out = {}
     for c, opts, p in zip(ctxs, options, best_combo):
         p.trucks_free = trucks_free
+        p.nothing_cost = p.cost if p.already_tripped else _do_nothing(c).cost
         p.explanation = _explain(c, p, trucks_free, len(ctxs))
         p.alternatives = [f"{alt.summary()}" for k, alt in sorted(opts.items())
                           if alt is not p][:3]
@@ -404,3 +447,28 @@ def replay_onset_plans(ds: Dataset, events: list) -> dict[str, Plan]:
             busy.setdefault(e.system_id, []).extend([p.busy_until_unix] * p.trucks)
         out[e.event_id] = p
     return out
+
+
+def whatif(ds: Dataset, event, plan: Plan) -> dict:
+    """Tank level from the plan's start to the repair end: with the plan vs doing nothing."""
+    c = _context(ds, event, plan.start_unix)
+    if c is None:
+        return {}
+    arrivals = [(c.response_min + i * c.cycle_min, plan.trucks * c.truck_bbl)
+                for i in range(plan.trips_per_truck)] if plan.trucks else []
+    shut = [(s, c.st.well_bpd.get(w, 0.0)) for w, s in plan.shutins]
+
+    def pts(arr, sh):
+        return [{"t": int(c.start_unix + m * 60), "level": round(v, 2)}
+                for m, v in trajectory(c.st, c.horizon_min, arr, sh)]
+
+    return {
+        "event_id": event.event_id, "facility_id": c.fac.id,
+        "start_unix": c.start_unix, "repair_end_unix": int(c.start_unix + c.horizon_min * 60),
+        "warning_pct": ds.warning_pct, "shutdown_pct": ds.shutdown_pct,
+        "plan": pts(arrivals, shut), "nothing": pts([], []),
+        "truck_arrivals_unix": [int(c.start_unix + a * 60) for a, _ in arrivals],
+        "shutins": [{"well": w, "start_unix": int(c.start_unix + s * 60)} for w, s in plan.shutins],
+        "plan_cost": round(plan.cost, 2), "nothing_cost": round(_do_nothing(c).cost, 2)
+        if not plan.already_tripped else round(plan.cost, 2),
+    }

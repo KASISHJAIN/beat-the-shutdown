@@ -67,4 +67,5 @@ shutdown, and recommends the cheapest response. Solo project, deadline Sun Nov 8
 - `python scripts/score.py ./HackUTD-ZeroDay/history` run accuracy report on all practice folders
 - `uvicorn backend.api:app --reload` backend
 - `cd frontend && npm run dev` frontend
+- `cd frontend && npm run build` then `uvicorn backend.api:app` serves API + console on :8000
 - `python -m backend.alerts <dataset folder> -o events.json --alerts` export events.json and print the alerts view
