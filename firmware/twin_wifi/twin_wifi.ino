@@ -15,9 +15,10 @@
     - threshold = quiet + 0.3 x (running - quiet), from medians of settled readings
 
   NO TYPING NEEDED (sending text from the Serial Monitor can reset this board):
-    - Power up with the water sensor DRY: it records "empty" automatically. "Full" is RAW_FULL.
-    - It measures vibration with the pump off, runs the pump, measures it running and sets the
-      stall threshold. Then the pump runs automatically between the twin's setpoints.
+    - Level uses fixed raw readings: RAW_EMPTY (dry) and RAW_FULL (full mark).
+    - At power-up it measures vibration with the pump off, runs the pump, measures it running and
+      sets the stall threshold. If running isn't at least 5x quiet (motor didn't spin), it prints
+      a warning and uses a fixed 0.05 g threshold. Then the pump runs automatically.
     - Automatic control is level-based: pump ON whenever level >= start setpoint, OFF whenever
       level <= stop setpoint (setpoints come from the server on every POST).
     - BOOT button (GPIO 0): toggle the pump. This overrides the automatic control until the level
@@ -49,6 +50,7 @@
 // Raw ADC reading with the sensor in water up to your "full" mark (bench sketch: 'f', or read
 // raw= in the serial log). Replace with your measured number.
 constexpr int RAW_FULL = 330;
+constexpr int RAW_EMPTY = 0;  // raw reading with the sensor dry (fixed; no auto-calibration)
 
 // ---------------- pins ----------------
 constexpr int PIN_LVL_PWR = 5, PIN_LVL_SIG = 4;
@@ -62,12 +64,14 @@ constexpr uint32_t POST_INTERVAL_MS = 2000;
 constexpr uint32_t STALL_IGNORE_MS = 2000;  // no stall checks for 2 s after the pump starts
 constexpr int STALL_CONFIRM = 2;            // low readings in a row before status 2
 constexpr float THRESH_FRACTION = 0.3f;     // threshold 30 % of the way from quiet to running
+constexpr float MIN_RUN_RATIO = 5.0f;       // running must be >= 5x quiet, else the motor didn't spin
+constexpr float FALLBACK_THRESHOLD = 0.05f; // g, used when calibration fails that check
 constexpr int PWM_FREQ = 20000, PWM_BITS = 8;
 constexpr int PUMP_DUTY = 220;              // 4xAA through the L298N leaves ~4 V, so start high
 constexpr uint32_t LOOP_DELAY_MS = 300;
 
 // ---------------- state ----------------
-int rawEmpty = 0, rawFull = RAW_FULL;
+int rawEmpty = RAW_EMPTY, rawFull = RAW_FULL;
 float vibQuiet = 0, vibRun = 0, vibThreshold = 0.05f;
 bool mpuOk = false;
 bool pumpOn = false;
@@ -150,8 +154,17 @@ float medianOf(float *v, int n) {
   return v[n / 2];
 }
 
-void updateThreshold() {
-  if (vibRun > vibQuiet) vibThreshold = vibQuiet + THRESH_FRACTION * (vibRun - vibQuiet);
+// Threshold 30 % of the way from quiet to running. If running isn't at least MIN_RUN_RATIO x
+// quiet, the motor probably didn't spin during calibration: use the fixed fallback instead.
+bool updateThreshold() {
+  if (vibRun >= MIN_RUN_RATIO * vibQuiet && vibRun > 0) {
+    vibThreshold = vibQuiet + THRESH_FRACTION * (vibRun - vibQuiet);
+    return true;
+  }
+  vibThreshold = FALLBACK_THRESHOLD;
+  Serial.printf("WARNING: running vibration %.4f g is not %.0fx quiet %.4f g (motor didn't spin?). "
+                "Using fixed threshold %.3f g\n", vibRun, MIN_RUN_RATIO, vibQuiet, FALLBACK_THRESHOLD);
+  return false;
 }
 
 // ---------------- pump ----------------
@@ -286,8 +299,7 @@ void postSample(float level, int status, float vib) {
 
 // ---------------- calibration ----------------
 void autoCalibrate() {
-  rawEmpty = readLevelRaw();
-  Serial.printf("auto: empty raw = %d (keep sensor dry at power-up), full raw = %d (RAW_FULL)\n", rawEmpty, rawFull);
+  Serial.printf("level: empty raw = %d (RAW_EMPTY), full raw = %d (RAW_FULL)\n", rawEmpty, rawFull);
   if (!mpuOk) {
     Serial.println("auto: IMU missing, running without stall detection");
     return;
@@ -300,9 +312,9 @@ void autoCalibrate() {
   float r[7];
   for (int i = 0; i < 7; i++) r[i] = vibration();
   vibRun = medianOf(r, 7);  // typical steady running vibration
-  updateThreshold();
-  Serial.printf("auto: quiet vib = %.4f, running vib = %.4f, threshold = %.4f\n", vibQuiet, vibRun, vibThreshold);
-  if (vibRun <= vibQuiet) Serial.println("warning: running vibration not above quiet; check the IMU is glued to the motor");
+  bool ok = updateThreshold();
+  Serial.printf("auto: quiet vib = %.4f, running vib = %.4f, threshold = %.4f%s\n", vibQuiet, vibRun,
+                vibThreshold, ok ? "" : " (FIXED FALLBACK)");
   setPump(false);  // hand over to automatic control
 }
 

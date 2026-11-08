@@ -26,6 +26,10 @@ CLEAR_Z = 0.6          # rolling mean below this (over CLEAR_WINDOW) closes a se
 CLEAR_WINDOW = 6
 MIN_FLAGGED = 6        # a segment needs at least this many flagged running samples
 SAMPLE_Z = 3.0         # a single sample this far out is unambiguously faulty
+# Worn pumps: CUSUM of the combined z (flow ratio + discharge pressure). On full_week the healthy
+# maximum is ~4.1 at k = 0.5, so H = 6.15 (1.5x) flags wear early without false alarms.
+WEAR_CUSUM_K = 0.5
+WEAR_CUSUM_H = 6.15
 # A leak's pressure deficit appears as a step of about this fraction of the pipeline's
 # running-vs-idle pressure offset, then grows linearly (measured on history/full_week).
 LEAK_STEP_FRACTION = 0.27
@@ -281,6 +285,54 @@ def detect_pump_failures(ds: Dataset, fac: Facility) -> list[dict]:
     return out
 
 
+def _cusum(z: np.ndarray, k: float, resets: set[int]) -> np.ndarray:
+    """One-sided CUSUM of z: accumulates sustained evidence of a drop, forgets noise."""
+    s = np.zeros(len(z))
+    acc = 0.0
+    for i, v in enumerate(z):
+        if i in resets:
+            acc = 0.0
+        acc = max(0.0, acc + v - k)
+        s[i] = acc
+    return s
+
+
+def _wear_segments(z: np.ndarray) -> list[tuple[int, int, int, int, float]]:
+    """Worn-pump segments: (start, last_bad, end_idx, flag_idx, evidence).
+
+    The rolling-mean segments confirm a wear event and decide when it ends. A CUSUM of the same
+    z flags it earlier (flag_idx), and an unconfirmed CUSUM alarm at the end of the data is
+    reported as a tentative, low-confidence event. evidence = peak CUSUM, which feeds confidence.
+    """
+    confirmed = _segments(z)
+    resets = {e for _, _, e, in confirmed if e != -1}
+    s = _cusum(z, WEAR_CUSUM_K, resets)
+    out = []
+    for start, last_bad, end_idx in confirmed:
+        # walk back through the CUSUM excursion that leads into this segment
+        j = start
+        while j > 0 and s[j - 1] > 0 and (j - 1) not in resets:
+            j -= 1
+        above = [i for i in range(j, start + 1) if s[i] > WEAR_CUSUM_H]
+        flag = above[0] if above else start
+        out.append((start, last_bad, end_idx, flag, float(s[flag:last_bad + 1].max())))
+    # tentative: CUSUM alarm still open at the end of the data, not yet confirmed
+    open_confirmed = any(e == -1 for _, _, e in confirmed)
+    n = len(z)
+    if not open_confirmed and n and s[-1] > WEAR_CUSUM_H:
+        j = n - 1
+        while j > 0 and s[j - 1] > 0 and (j - 1) not in resets:
+            j -= 1
+        flag = next(i for i in range(j, n) if s[i] > WEAR_CUSUM_H)
+        out.append((flag, n - 1, -1, flag, float(s[flag:].max())))
+    return out
+
+
+def _wear_confidence(evidence: float) -> float:
+    """Low right at the alarm (~0.4), rising as the CUSUM keeps accumulating (0.86 at 4x)."""
+    return float(min(0.999, 1.0 - np.exp(-evidence / (2.0 * WEAR_CUSUM_H))))
+
+
 def detect_pump_degradation(ds: Dataset, fac: Facility, failures: list[dict]) -> list[dict]:
     t_run, mask = _running(ds, fac, (fac.pump_id, "flow_bpd"), (fac.pump_id, "discharge_psi"))
     if len(t_run) < WINDOW * 2:
@@ -295,8 +347,8 @@ def detect_pump_degradation(ds: Dataset, fac: Facility, failures: list[dict]) ->
     fail_ends = sorted(f["end"] for f in failures if f["end"] is not None)
     out = []
     prev_end = ds.start_unix
-    for start, last_bad, end_idx in _segments(z):
-        lo = max(start - WINDOW + 1, 0)
+    for start, last_bad, end_idx, flag, evidence in _wear_segments(z):
+        lo = max(min(start, flag) - WINDOW + 1, 0)
         hi = last_bad
         th = (t_run[lo:hi + 1] - t_run[lo]) / 3600.0
         y = ratio[lo:hi + 1]
@@ -305,15 +357,16 @@ def detect_pump_degradation(ds: Dataset, fac: Facility, failures: list[dict]) ->
         slope, icpt = np.polyfit(th, y, 1)
         if slope >= 0:
             continue  # not a decline
-        lower = max([prev_end] + [e for e in fail_ends if e <= t_run[start]])
-        onset = _hinge_onset(t_run, z, lower, int(t_run[start]), int(t_run[hi]), ds.step_s)
+        first = min(start, flag)
+        lower = max([prev_end] + [e for e in fail_ends if e <= t_run[first]])
+        onset = _hinge_onset(t_run, z, lower, int(t_run[first]), int(t_run[hi]), ds.step_s)
         prev_end = int(t_run[end_idx]) if end_idx != -1 else int(t_run[-1])
         # end: repair (snap back) or the pump failing, whichever comes first
         end = _end_time(ds, t_run, last_bad, end_idx)
         nxt_fail = [f for f in fail_onsets if f > t_run[last_bad]]
         if nxt_fail and (end is None or nxt_fail[0] <= end):
             end = nxt_fail[0]
-        zbar = float(np.mean(z[start:hi + 1])) if hi >= start else float(z[start])
+        conf = _wear_confidence(evidence)
         r_now = y[-1]
         ev = [f"Flow ratio (flow/max_flow) trending {slope * 100:+.2f}%/h while running "
               f"(baseline {s_ratio.base:.3f}, latest {r_now:.3f})",
@@ -324,8 +377,11 @@ def detect_pump_degradation(ds: Dataset, fac: Facility, failures: list[dict]) ->
         elif end is not None:
             ev.append(f"Flow ratio back to baseline by {_iso(end)} (repaired)"
                       + _gap_note(ds, t_run, last_bad, end_idx))
+        if conf < 0.6:
+            ev.insert(0, f"Early flag: the drop is still small, so confidence is {conf:.0%} and will rise "
+                         f"as the trend continues")
         out.append(dict(category="pump_degradation", asset_id=fac.pump_id, onset=onset, end=end,
-                        confidence=_confidence(zbar), evidence=ev, detected=int(t_run[start]),
+                        confidence=conf, evidence=ev, detected=int(t_run[first]),
                         last_seen=int(t_run[last_bad])))
     return out
 
