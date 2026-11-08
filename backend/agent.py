@@ -135,7 +135,10 @@ class Toolbox:
                 "shutdown_at": shutdown_at, "repair_due": repair_due,
                 "lost_revenue_per_hour": a.get("lost_revenue_per_hour"),
                 "plan": p.get("summary"), "plan_cost": p.get("est_cost"), "do_nothing_cost": p.get("nothing_cost"),
-                "actions": a.get("recommended_actions"),
+                # shut-in starts as clock times too, so the model never adds minutes to "now"
+                "actions": [dict(x, start_at=_iso(start + x.get("start_after_min", 0) * 60))
+                            if x.get("type") == "shut_in_wells" else x
+                            for x in a.get("recommended_actions") or []],
                 "evidence": a.get("evidence", [])[:3] + (a.get("evidence", [])[-1:] if a.get("unverified") else []),
             })
         recent = [{"event_id": e.event_id, "category": e.category, "asset_id": e.asset_id,
