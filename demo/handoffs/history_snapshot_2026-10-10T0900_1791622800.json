@@ -1,0 +1,48 @@
+{
+  "source": "nemotron",
+  "model": "nvidia/nemotron-3-ultra-550b-a55b",
+  "markdown": "# Shift handoff - 2026-10-10 09:00 UTC\n## Act now\n1. **S4_FACILITY_A** (EV-0021) — shutdown at 11:56 UTC, repair due 14:00 UTC  \n   Plan: dispatch 1 truck now (arrives 10:25 UTC, 1 trip, $905) + shut in S4_WELL_A2 at 13:52 UTC (+292 min, $63).  \n   Cost $968 vs $6,308 doing nothing.\n\n2. **S4_FACILITY_C** (EV-0019) — shutdown at 12:15 UTC, repair due 13:00 UTC  \n   Plan: dispatch 1 truck now (arrives 10:30 UTC, 1 trip, $905).  \n   Cost $905 vs $2,570 doing nothing.\n\n3. **S4_FACILITY_D** (EV-0020) — shutdown at 12:28 UTC, repair due 13:30 UTC  \n   Plan: shut in S4_WELL_D2 at 10:48 UTC (+108 min, $1,215).  \n   Cost $1,215 vs $3,122 doing nothing.\n\n## Inspect\n- **URGENT (unverified)** S2_PIPELINE_C at S2_FACILITY_C (EV-0017) — pipeline leak suspected since 2026-10-09 10:00 UTC. Pressure 87 psi below baseline, flow loss 243 bpd. Pump discharge normal. Last confirmed 2026-10-10 05:15 UTC; pump not running since. Field inspection required.\n\n## Watch\n- S4_TANK_A: 64.4%, rising ~9.4 pts/h (pump failed 08:00 UTC)\n- S4_TANK_C: 60.4%, rising ~9.7 pts/h (pump failed 07:00 UTC)\n- S4_TANK_D: 59.2%, rising ~9.4 pts/h (pump failed 07:30 UTC)\n- S2_TANK_C: 65.3%, rising ~9.7 pts/h — pump should auto-start at 70% (~09:29 UTC); will confirm if pipeline leak persists.\n\n## Resolved this shift\n- EV-0016: S1_PIPELINE_B pipeline leak (onset 2026-10-09 04:00 UTC, cleared 2026-10-10 02:00 UTC)\n- EV-0018: S4_PUMP_B pump failure (onset 2026-10-09 18:00 UTC, cleared 2026-10-10 00:00 UTC)\n\n## Notes\n- Fleet: 2 trucks free, shared across the three pump failures above.\n- S2_PIPELINE_C leak flagged unverified (confidence 0.999); a repair would not show until the pump restarts.",
+  "steps": [
+    {
+      "tool": "get_alerts",
+      "args": {},
+      "ms": 5,
+      "ok": true
+    },
+    {
+      "tool": "optimize_plan",
+      "args": {
+        "event_id": "EV-0021"
+      },
+      "ms": 5,
+      "ok": true
+    },
+    {
+      "tool": "optimize_plan",
+      "args": {
+        "event_id": "EV-0019"
+      },
+      "ms": 3,
+      "ok": true
+    },
+    {
+      "tool": "optimize_plan",
+      "args": {
+        "event_id": "EV-0020"
+      },
+      "ms": 4,
+      "ok": true
+    },
+    {
+      "tool": "write_handoff",
+      "args": {},
+      "ms": 2,
+      "ok": true
+    }
+  ],
+  "ungrounded": [],
+  "now_unix": 1791622800,
+  "seconds": 35.5,
+  "dataset": "history/snapshot_2026-10-10T0900",
+  "generated_at": "2026-11-08T12:42:15Z"
+}

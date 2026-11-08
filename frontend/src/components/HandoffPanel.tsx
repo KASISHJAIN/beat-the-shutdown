@@ -92,13 +92,15 @@ export function HandoffPanel({ dataset, now, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const run = useCallback(() => {
+  // First open: a pre-generated handoff for this moment comes back instantly if one exists.
+  // Regenerate always asks the agent again.
+  const run = useCallback((fresh = false) => {
     setBusy(true);
     setErr(null);
-    api.handoff(dataset, now).then(setRes).catch((e) => setErr(String(e.message ?? e))).finally(() => setBusy(false));
+    api.handoff(dataset, now, fresh).then(setRes).catch((e) => setErr(String(e.message ?? e))).finally(() => setBusy(false));
   }, [dataset, now]);
 
-  useEffect(run, [run]);
+  useEffect(() => run(false), [run]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -133,10 +135,15 @@ export function HandoffPanel({ dataset, now, onClose }: Props) {
               {res.source === "nemotron" ? "Nemotron" : "Template"}
             </span>
           )}
+          {res?.cached && (
+            <span className="tag tag-template" title={`Saved ${res.generated_at ?? ""}. Regenerate asks the agent again.`}>
+              Pre-generated
+            </span>
+          )}
           <div className="modal-actions">
             <button className="btn btn-small" onClick={copy} disabled={!res || busy}>{copied ? "Copied" : "Copy"}</button>
             <button className="btn btn-small" onClick={download} disabled={!res || busy}>Download .md</button>
-            <button className="btn btn-small" onClick={run} disabled={busy}>Regenerate</button>
+            <button className="btn btn-small" onClick={() => run(true)} disabled={busy}>Regenerate</button>
             <button className="btn btn-small" onClick={onClose} aria-label="Close">Close</button>
           </div>
         </header>

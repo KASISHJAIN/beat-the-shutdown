@@ -8,6 +8,7 @@ interface Props {
   datasets: Dataset[];
   dataset: string;
   onDataset: (id: string) => void;
+  onRefreshDatasets: () => void; // re-scan folders (e.g. a freshly pulled test/) when the picker opens
   time: TimeInfo | null;
   pending: number | null; // slider position while dragging / before data arrives
   onScrub: (t: number) => void; // live while dragging
@@ -42,7 +43,8 @@ export function Header(p: Props) {
 
       <label className="field">
         <span className="field-label">Dataset</span>
-        <select value={p.dataset} onChange={(e) => p.onDataset(e.target.value)} aria-label="Dataset">
+        <select value={p.dataset} onChange={(e) => p.onDataset(e.target.value)} aria-label="Dataset"
+          onFocus={p.onRefreshDatasets} onMouseDown={p.onRefreshDatasets}>
           {p.datasets.map((d) => (
             <option key={d.id} value={d.id}>
               {d.label}

@@ -41,5 +41,6 @@ export const api = {
   plan: (dataset: string, event_id: string, now?: number | null) =>
     get<PlanResponse>("/api/plan", { dataset, event_id, now }),
   twin: () => get<TwinStatus>("/api/twin", {}),
-  handoff: (dataset: string, now?: number | null) => get<HandoffResponse>("/api/handoff", { dataset, now }, "POST"),
+  handoff: (dataset: string, now?: number | null, fresh = false) =>
+    get<HandoffResponse>("/api/handoff", { dataset, now, fresh: fresh ? "true" : undefined }, "POST"),
 };

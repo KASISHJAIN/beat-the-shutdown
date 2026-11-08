@@ -89,6 +89,15 @@ export default function App() {
     }).catch((e) => setError(`API unreachable (${e.message}). Is the backend running on :8000?`));
   }, []);
 
+  // The server re-scans the data folder on every request, so a new folder (say a freshly
+  // pulled test/) shows up when the picker is opened: no restart or reload needed.
+  const lastRefresh = useRef(0);
+  const refreshDatasets = useCallback(() => {
+    if (Date.now() - lastRefresh.current < 3000) return;
+    lastRefresh.current = Date.now();
+    api.datasets().then((r) => setDatasets(r.datasets)).catch(() => { /* keep the current list */ });
+  }, []);
+
   useEffect(() => {
     if (!dataset) return;
     const id = ++req.current;
@@ -178,7 +187,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header datasets={datasets} dataset={dataset} onDataset={chooseDataset} time={network}
+      <Header datasets={datasets} dataset={dataset} onDataset={chooseDataset} onRefreshDatasets={refreshDatasets} time={network}
         pending={pending} onScrub={setPending} onCommit={commit} playing={playing}
         onTogglePlay={() => setPlaying((x) => !x)} loading={loading} theme={theme} onToggleTheme={toggleTheme}
         onHandoff={() => { setPlaying(false); setHandoffOpen(true); }} />

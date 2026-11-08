@@ -486,10 +486,45 @@ def generate_handoff(ds: Dataset, events: list | None = None, extra_alerts: list
             "now_unix": ds.now_unix, "seconds": round(time.time() - t0, 1)}
 
 
+# --- pre-generated handoffs for demos -------------------------------------------------
+DEMO_DIR = ROOT / "demo" / "handoffs"
+
+
+def demo_path(dataset_id: str, now_unix: int) -> Path:
+    return DEMO_DIR / (re.sub(r"[^A-Za-z0-9_.-]+", "_", dataset_id) + f"_{now_unix}.json")
+
+
+def load_demo(dataset_id: str, now_unix: int) -> dict | None:
+    """A saved handoff for exactly this dataset and moment, if one was pre-generated."""
+    p = demo_path(dataset_id, now_unix)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def save_demo(dataset_id: str, result: dict) -> Path:
+    DEMO_DIR.mkdir(parents=True, exist_ok=True)
+    p = demo_path(dataset_id, result["now_unix"])
+    rec = dict(result, dataset=dataset_id,
+               generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    p.write_text(json.dumps(rec, indent=2, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
 if __name__ == "__main__":
+    # python -m backend.agent [history/snapshot_2026-10-10T0900] [--save]
     import sys
     from .loader import load_dataset
-    out = generate_handoff(load_dataset(sys.argv[1] if len(sys.argv) > 1 else
-                                        ROOT / "HackUTD-ZeroDay" / "history" / "snapshot_2026-10-10T0900"))
-    print(f"[{out['source']}] {len(out['steps'])} tool calls\n")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    dataset_id = args[0] if args else "history/snapshot_2026-10-10T0900"
+    out = generate_handoff(load_dataset(ROOT / "HackUTD-ZeroDay" / dataset_id))
+    print(f"[{out['source']}] {len(out['steps'])} tool calls, {out['seconds']} s, ungrounded {out['ungrounded']}\n")
     print(out["markdown"])
+    if "--save" in sys.argv:
+        if out["source"] != "nemotron" or out["ungrounded"]:
+            print("\nNot saved: only a Nemotron handoff that passes the grounding check is kept for demos.")
+        else:
+            print(f"\nSaved for the console: {save_demo(dataset_id, out).relative_to(ROOT)}")

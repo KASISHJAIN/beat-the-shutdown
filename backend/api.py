@@ -320,11 +320,18 @@ def agent_info():
 
 
 @app.post("/api/handoff")
-def handoff(dataset: str, now: int | None = None, include_twin: bool = True, use_llm: bool = True):
+def handoff(dataset: str, now: int | None = None, include_twin: bool = True, use_llm: bool = True,
+            fresh: bool = False):
     """Write the shift handoff for this dataset at `now` (plus the live twin when streaming).
-    Never fails because of the LLM: without a key or on any LLM error it uses the template."""
+    Never fails because of the LLM: without a key or on any LLM error it uses the template.
+    A handoff pre-generated for exactly this dataset and moment (demo/handoffs/) is returned
+    instantly unless fresh=true."""
     from . import agent
     dataset, now = _ctx(dataset, now)
+    if not fresh:
+        saved = agent.load_demo(dataset, now)
+        if saved is not None:
+            return _clean(dict(saved, cached=True))
     ds, evs = _cut(dataset, now)
     extra = []
     st = twin_mod.store()

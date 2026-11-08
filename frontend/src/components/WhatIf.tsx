@@ -1,7 +1,7 @@
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { Plan, WhatIf as WhatIfData } from "../types";
 import type { Palette } from "../theme";
-import { dayTime, hhmm, money } from "../format";
+import { dayTime, hhmm, hhmmss, money } from "../format";
 
 interface Props {
   whatif: WhatIfData;
@@ -24,7 +24,8 @@ export function WhatIf({ whatif: w, plan, palette: c, replay }: Props) {
         <ResponsiveContainer width="100%" height="100%">
           <LineChart margin={{ top: 8, right: 12, bottom: 0, left: -12 }}>
             <CartesianGrid stroke={c.grid} strokeDasharray="3 3" />
-            <XAxis dataKey="t" type="number" domain={[w.start_unix, w.repair_end_unix]} tickFormatter={hhmm}
+            <XAxis dataKey="t" type="number" domain={[w.start_unix, w.repair_end_unix]}
+              tickFormatter={w.repair_end_unix - w.start_unix < 3600 ? hhmmss : hhmm}
               stroke={c.muted} tick={{ fontSize: 11 }} allowDuplicatedCategory={false} />
             <YAxis domain={[(min: number) => Math.max(0, Math.floor(Math.min(min, w.warning_pct - 15) / 10) * 10), 100]} stroke={c.muted}
               tick={{ fontSize: 11 }} unit="%" />

@@ -197,6 +197,8 @@ export interface HandoffResponse {
   markdown: string;
   steps: { tool: string; args: Record<string, unknown>; ms: number; ok: boolean }[];
   ungrounded?: string[]; // times / $ amounts in the text that no tool output contains
+  cached?: boolean;      // a pre-generated handoff for this exact dataset and moment
+  generated_at?: string;
   now_unix: number;
   seconds: number;
 }

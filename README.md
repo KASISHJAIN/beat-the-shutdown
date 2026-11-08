@@ -5,8 +5,42 @@ telemetry, detects **pump failures, pipeline leaks and worn pumps**, counts down
 shutdown limit, and recommends the cheapest response: trucks, well shut-ins, a mix, or accepting
 the trip, with all failures in a system sharing its trucks.
 
-![Console screenshot](docs/screenshot.png)
-<!-- Screenshot placeholder: save a capture of the console as docs/screenshot.png -->
+![Alerts view: pump failures in SPEC order with countdowns and plans, the live hardware twin, and the network map](docs/alerts.png)
+
+## Screenshots
+
+| | |
+|---|---|
+| ![What-if replay](docs/whatif.png) | ![Shift handoff](docs/handoff.png) |
+| **What-if replay.** Tank level under the recommended plan (a truck, then a late shut-in) vs doing nothing, against the warning and shutdown lines | **Shift handoff.** Written by the Nemotron agent from the console's own tools; every time and cost is checked against them |
+| ![Live hardware twin](docs/twin.png) | ![Phone](docs/phone.png) |
+| **Live hardware twin.** The ESP32 facility mid-stall: LIVE badge, countdown and plan, vibration-based fault | **Phone.** The same console as tabs |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph data["Dataset folder (history/*, test/)"]
+        N[network.json]
+        O[ops.json]
+        T[telemetry.csv]
+    end
+    ESP["ESP32-S3 twin<br/>level, pump status, vibration"] -- "POST /twin/ingest every 2 s" --> TW[twin.py<br/>live facility]
+    N & O & T --> L[loader.py<br/>"now" = last ts_unix]
+    L --> D[detect.py<br/>failures, leaks, worn pumps]
+    TW --> D
+    D --> F[forecast.py<br/>hours_to_limit p10/p50/p90]
+    F --> P[optimize.py<br/>cheapest plan, shared trucks]
+    P --> A[alerts.py<br/>SPEC order, events.json]
+    A --> API[api.py<br/>FastAPI + ?now= time travel]
+    A --> AG[agent.py<br/>Nemotron tool-using handoff]
+    AG -- "llm_chat()" --> NV[(NVIDIA API)]
+    AG --> API
+    API --> UI[React console<br/>alerts, map, what-if, handoff]
+    K[answer_key.json] -. "scorer only" .-> S[scripts/score.py]
+    D --> S
+    P --> S
+```
 
 ## What's in it
 
@@ -39,12 +73,23 @@ npm install
 npm run dev                                  # http://localhost:5173, proxies /api to :8000
 ```
 
-Single-port option: run `npm run build` in `frontend/` once. `uvicorn backend.api:app` then also
-serves the built console at http://127.0.0.1:8000. To try it from a phone on the same network,
-start uvicorn with `--host 0.0.0.0`, or open the Vite dev server's network URL.
+**Demo / judging (one command, Windows):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1
+```
+
+It builds the console if needed, serves the API and console together on `0.0.0.0:8000`, and
+prints the console URL plus the laptop's IPv4 (for phones and for `SERVER_HOST` in the ESP32's
+`secrets.h`). Use `-Rebuild` to force a fresh build and `-Port 8001` for another port.
+
+Single-port option by hand: run `npm run build` in `frontend/` once. `uvicorn backend.api:app`
+then also serves the built console at http://127.0.0.1:8000. Add `--host 0.0.0.0` for phones.
 
 Any folder under `HackUTD-ZeroDay/` that holds the three data files shows up in the dataset
-switcher, including `test/` once it has been pulled (`git -C HackUTD-ZeroDay pull`).
+switcher, including `test/` once it has been pulled (`git -C HackUTD-ZeroDay pull`). The server
+re-scans on every request and the switcher refreshes when opened, so no restart or reload is
+needed.
 
 ## Using the console
 
@@ -112,11 +157,22 @@ The **Shift handoff** button in the header writes a handoff for the moment on sc
 | `write_handoff` | Saves the final Markdown (also to `handoffs/`, gitignored) |
 
 To turn it on, copy `.env.example` to `.env` and set `NVIDIA_API_KEY` (from build.nvidia.com).
-The model defaults to `nvidia/llama-3.3-nemotron-super-49b-v1` and can be changed with
-`NVIDIA_MODEL`. The only LLM call is `llm_chat()`. Without a key, or if the call fails for any
-reason, the same tools fill a fixed template, so the button always works. The panel shows which
-mode was used and the tool calls made. From the command line:
-`python -m backend.agent HackUTD-ZeroDay/history/snapshot_2026-10-10T0900`.
+The model defaults to `nvidia/nemotron-3-ultra-550b-a55b` (a faster option is
+`nvidia/nemotron-3.5-lightning-30b-a3b`) and can be changed with `NVIDIA_MODEL`. The only LLM
+call is `llm_chat()`. Without a key, if the call fails, or after a 120 s budget, the same tools
+fill a fixed template, so the button always works. Every clock time, $ amount and $/h rate in
+the handoff is checked against the tool outputs, and anything that doesn't match is flagged in
+the panel. The panel also shows which mode was used and the tool calls made.
+
+**Pre-generated for the demo.** A live run takes about 30 s. For instant opening, a Nemotron
+handoff for `snapshot_2026-10-10T0900` is saved in `demo/handoffs/`, and the console returns it
+immediately when that dataset is shown at its latest time (badge "Pre-generated"). **Regenerate**
+always asks the agent again. To save one for another dataset (kept only if Nemotron wrote it and
+it passes the number check):
+
+```bash
+python -m backend.agent history/snapshot_2026-10-10T0900 --save
+```
 
 ## Results
 

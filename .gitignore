@@ -8,4 +8,4 @@ frontend/dist/
 events.json
 firmware/**/secrets.h
 .env
-handoffs/
+/handoffs/
